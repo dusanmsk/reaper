@@ -233,7 +233,7 @@ end
 
 -- converts 'gui' line to record id
 function recordIndex(line)
-    return line+pattern.offset
+    return line + pattern.offset
 end
 
 function notePressed(key)
@@ -253,7 +253,7 @@ function notePressed(key)
     if isKey(key, '`') then pitch = NOTE_OFF end
 
     if pitch ~= nil then
-        rec = getOrCreateRecord(cursor.track, recordIndex(cursor.line) )
+        rec = getOrCreateRecord(cursor.track, recordIndex(cursor.line))
         rec.pitch = toPitch(pitch)
         if rec.pitch ~= NOTE_OFF then
             rec.velocity = 50
@@ -293,6 +293,10 @@ function processKeyboard()
     if key == keycodes.octaveUp then changeOctave(1) end
     if key == keycodes.octaveDown then changeOctave(-1) end
     if key == keycodes.deleteKey then deleteUnderCursor() end
+    if key == keycodes.homeKey then pattern.offset = 0 end
+    if key == keycodes.endKey then pattern.offset = pattern.steps - DISPLAY_LINES; end
+    if key == keycodes.pageDown then pattern.offset = pattern.offset + 8 end
+    if key == keycodes.pageUp then pattern.offset = pattern.offset - 8 end
 
     if cursor.line < 0 then cursor.line = 0; pattern.offset = pattern.offset - 1; end
     if cursor.line > DISPLAY_LINES - 1 then cursor.line = DISPLAY_LINES - 1; pattern.offset = pattern.offset + 1; end
