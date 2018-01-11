@@ -2,6 +2,7 @@
 TODO: pevny pocet trackov
 TODO: nacitat PATTERN_DATA z midi clipu a pouzit ich
 TODO: scrolling
+TODO: beats for timing?
 
 scrolling spravit tak, ze sa idealne oddeli zobrazovaci mechanizmus do extra classy.
 jeho vstupom bude pattern a offset v patterne, od ktoreho ma zacat.
@@ -16,6 +17,7 @@ jeho vstupom bude pattern a offset v patterne, od ktoreho ma zacat.
 FONTSIZE = 20
 TRACK_COLUMNS = 4
 NUM_OF_TRACKS = 8
+
 DISPLAY_LINES = 32
 
 MIDI_CLIP_UPDATE_TIME = 0.5
@@ -41,10 +43,8 @@ keycodes.endKey = 6647396
 keycodes.deleteKey = 6579564
 keycodes.insertKey = 6909555
 
-
 global = {}
 global.octave = 4
-
 
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
@@ -52,21 +52,12 @@ end
 
 function err(m)
     msg = "Error" .. m
+    dbg(msg)
 end
 
 tracks = {}
-for i = 0, NUM_OF_TRACKS, 1 do
-    tracks[i] = {}
-end
-
-function init()
-    gfx.init("", 800, 800, 0)
-    gfx.setfont(1, "Monospace", FONTSIZE)
-    gfx.clear = 55
-end
-
 pattern = {}
-pattern.steps = 32
+pattern.steps = 0
 pattern.offset = 0
 
 cursor = {}
@@ -79,13 +70,44 @@ cursor.nextLine = function()
 end
 
 
-WHITE = { r = 1.0, g = 1.0, b = 1.0 }
+WHITE = { r = 0.8, g = 0.8, b = 0.8 }
+WHITE_BRIGHT = { r = 1.0, g = 1.0, b = 1.0 }
 YELLOW = { r = 1.0, g = 1.0, b = 0.5 }
 GREEN = { r = 0.0, g = 1.0, b = 0.0 }
 BLACK = { r = 0.0, g = 0.0, b = 0.0 }
 function setColor(color)
     gfx.set(color.r, color.g, color.b)
 end
+
+
+function beatsToLines(beats)
+    return math.floor(4 * beats)
+end
+
+function init()
+    for i = 0, NUM_OF_TRACKS, 1 do
+        tracks[i] = {}
+    end
+
+    gfx.init("", 800, 800, 0)
+    gfx.setfont(1, "Monospace", FONTSIZE)
+    gfx.clear = 55
+    --gfx.dock(1)
+
+    -- get basic informations from currently edited take
+    -- TODO change to selected item instead of opened midi editor
+    editor = reaper.MIDIEditor_GetActive()
+    pattern.take = reaper.MIDIEditor_GetTake(editor)
+    item = reaper.GetMediaItemTake_Item(pattern.take)
+    itemLengthSec = reaper.GetMediaItemInfo_Value(item, 'D_LENGTH')
+    retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
+    pattern.steps = beatsToLines(fullbeatsOutOptional)
+
+
+    loadMidiClip()
+    update()
+end
+
 
 noteStrings = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" }
 function noteToString(pitch)
@@ -135,7 +157,7 @@ function drawCell(trackNo, line, column, value)
         gfx.x = x; gfx.y = y
         gfx.printf(value)
     else
-        setColor(WHITE)
+        setColorByLine(line)
         gfx.x = x; gfx.y = y
         gfx.printf(value)
     end
@@ -162,14 +184,9 @@ end
 
 -- draw specified track
 function drawTrack(trackNo)
-    for line = 0, DISPLAY_LINES, 1 do
+    for line = 0, DISPLAY_LINES -1, 1 do
         drawTrackEntry(trackNo, line)
     end
-end
-
-function drawLineNo(x, y, lineno)
-    setColor(WHITE)
-    gfx.y = y; gfx.x = x; gfx.printf("%02d", lineno)
 end
 
 function getOrCreateRecord(trackNo, line)
@@ -283,7 +300,7 @@ function processKeyboard()
 
     if key ~= 0 then
         muteTones(true)
-        dbg("Key pressed: " .. key)
+        -- dbg("Key pressed: " .. key)
     end
 
     if key == keycodes.downArrow then cursor.line = cursor.line + 1 end
@@ -302,7 +319,7 @@ function processKeyboard()
     if cursor.line > DISPLAY_LINES - 1 then cursor.line = DISPLAY_LINES - 1; pattern.offset = pattern.offset + 1; end
 
     if pattern.offset < 0 then pattern.offset = 0; end
-    if pattern.offset > pattern.steps then pattern.offset = pattern.steps - 1; end
+    if pattern.offset > pattern.steps - DISPLAY_LINES  then pattern.offset = pattern.steps - DISPLAY_LINES ; end
 
     -- jump cursor between tracks
     if cursor.column > TRACK_COLUMNS - 1 then cursor.track = cursor.track + 1; cursor.column = 0; end
@@ -428,12 +445,25 @@ function saveMidiClip()
     reaper.Undo_EndBlock2(0, "Pattern editor", 0)
 end
 
+function setColorByLine(lineno)
+    if lineno % 8 == 0 then
+        setColor(WHITE_BRIGHT)
+    else
+        setColor(WHITE)
+    end
+end
+
+function drawLineNumber(lineno)
+    setColorByLine(lineno)
+    gfx.x = LINECOL_OFFSET
+    gfx.y = line2y(lineno)
+    gfx.printf("%02d", lineno + pattern.offset )
+end
+
 function drawAllTracks()
     -- line numbers
-    for idx = 0, DISPLAY_LINES, 1 do
-        gfx.x = LINECOL_OFFSET
-        gfx.y = line2y(idx)
-        gfx.printf("%02d", idx + pattern.offset)
+    for idx = 0, DISPLAY_LINES -1, 1 do
+        drawLineNumber(idx)
     end
     -- all tracks
     for i = 0, NUM_OF_TRACKS - 1, 1 do
@@ -443,6 +473,7 @@ end
 
 
 function update()
+    DISPLAY_LINES = math.floor(gfx.h / FONTSIZE) - 1
     drawAllTracks()
     gfx.clear = 0 -- background color
     gfx.update()
@@ -464,25 +495,7 @@ function loop()
     reaper.defer(loop)
 end
 
-
-
-
-
-
 init()
-
--- get basic informations from currently edited take
--- TODO change to selected item instead of opened midi editor
-editor = reaper.MIDIEditor_GetActive()
-pattern.take = reaper.MIDIEditor_GetTake(editor)
-item = reaper.GetMediaItemTake_Item(pattern.take)
-itemLengthSec = reaper.GetMediaItemInfo_Value(item, 'D_LENGTH')
-itemLengthPpq = reaper.MIDI_GetPPQPosFromProjTime(pattern.take, itemLengthSec)
-dbg(itemLengthPpq)
-pattern.steps = ppq2line(itemLengthPpq)
-
-loadMidiClip()
-update()
 
 --debugColumns()
 loop()
