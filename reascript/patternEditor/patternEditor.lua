@@ -45,6 +45,7 @@ keycodes.insertKey = 6909555
 
 global = {}
 global.octave = 4
+global.selectedItem = nil
 
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
@@ -64,11 +65,6 @@ cursor = {}
 cursor.track = 0
 cursor.column = 0
 cursor.line = 0
-cursor.nextLine = function()
-    cursor.line = cursor.line + 1
-    if cursor.line > pattern.steps - 1 then cursor.line = 0 end
-end
-
 
 WHITE = { r = 0.8, g = 0.8, b = 0.8 }
 WHITE_BRIGHT = { r = 1.0, g = 1.0, b = 1.0 }
@@ -85,10 +81,6 @@ function beatsToLines(beats)
 end
 
 function init()
-    for i = 0, NUM_OF_TRACKS, 1 do
-        tracks[i] = {}
-    end
-
     gfx.init("", 800, 800, 0)
     gfx.setfont(1, "Monospace", FONTSIZE)
     gfx.clear = 55
@@ -96,16 +88,32 @@ function init()
 
     -- get basic informations from currently edited take
     -- TODO change to selected item instead of opened midi editor
-    editor = reaper.MIDIEditor_GetActive()
-    pattern.take = reaper.MIDIEditor_GetTake(editor)
-    item = reaper.GetMediaItemTake_Item(pattern.take)
-    itemLengthSec = reaper.GetMediaItemInfo_Value(item, 'D_LENGTH')
+end
+
+function itemSelectionChanged()
+
+    tracks = {}
+    for i = 0, NUM_OF_TRACKS, 1 do
+        tracks[i] = {}
+    end
+
+    cursor.track = 0
+    cursor.column = 0
+    cursor.line = 0
+    pattern.offset = 0
+
+    if global.selectedItem == nil then
+        pattern.steps=32
+        update()
+        return
+    end
+    itemLengthSec = reaper.GetMediaItemInfo_Value(global.selectedItem, 'D_LENGTH')
+    pattern.take = reaper.GetMediaItemTake(global.selectedItem, 0)
     retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
     pattern.steps = beatsToLines(fullbeatsOutOptional)
-
-
     loadMidiClip()
     update()
+
 end
 
 
@@ -275,7 +283,7 @@ function notePressed(key)
         if rec.pitch ~= NOTE_OFF then
             rec.velocity = 50
         end
-        cursor.nextLine()
+        processKey(keycodes.downArrow)
 
         generateTone(rec.pitch)
 
@@ -287,7 +295,7 @@ function deleteUnderCursor()
     trackNo = cursor.track
     -- todo do not delete whole line, but only what is under cursor
     deleteRecord(trackNo, recordIndex(cursor.line))
-    cursor.nextLine()
+    processKey(keycodes.downArrow)
 end
 
 
@@ -297,12 +305,14 @@ end
 
 function processKeyboard()
     key = gfx.getchar()
-
     if key ~= 0 then
         muteTones(true)
         -- dbg("Key pressed: " .. key)
     end
+    return processKey(key)
+end
 
+function processKey(key)
     if key == keycodes.downArrow then cursor.line = cursor.line + 1 end
     if key == keycodes.upArrow then cursor.line = cursor.line - 1 end
     if key == keycodes.rightArrow then cursor.column = cursor.column + 1 end
@@ -335,12 +345,12 @@ end
 
 function line2ppq(lineNo)
     -- todo grid size
-    return lineNo * 240
+    return math.floor(lineNo * 240)
 end
 
 function ppq2line(ppq)
     -- todo grid size
-    return ppq / 240
+    return math.floor(ppq / 240)
 end
 
 
@@ -398,14 +408,16 @@ function loadMidiClip()
                 linestart = ppq2line(startppqpos)
                 lineend = ppq2line(endppqpos)
 
+                -- place noteoff into pattern
+                rec = getOrCreateRecord(trackNo, lineend+1)
+                -- dbg("noteoff placed at " .. lineend)
+                rec.pitch = NOTE_OFF
+
                 -- place note into pattern
                 rec = getOrCreateRecord(trackNo, linestart)
                 rec.pitch = pitch
                 rec.velocity = vel
 
-                -- place noteoff into pattern
-                rec = getOrCreateRecord(trackNo, lineend)
-                rec.pitch = NOTE_OFF
             end
         end
         -- TODO grid size
@@ -433,7 +445,7 @@ function saveMidiClip()
                     noteLength = getNoteLength(track, lineNo)
                     reaper.MIDI_InsertNote(pattern.take, false, false,
                         line2ppq(lineNo),
-                        line2ppq(lineNo) + line2ppq(noteLength),
+                        line2ppq(lineNo) + line2ppq(noteLength) - 1,
                         trackNo,
                         record.pitch,
                         record.velocity,
@@ -474,6 +486,7 @@ end
 
 function update()
     DISPLAY_LINES = math.floor(gfx.h / FONTSIZE) - 1
+    if  pattern.steps < DISPLAY_LINES then DISPLAY_LINES = pattern.steps; end
     drawAllTracks()
     gfx.clear = 0 -- background color
     gfx.update()
@@ -491,6 +504,14 @@ function loop()
         saveMidiClip()
         lastUpdateTime = lastEditTime
     end
+
+    item = reaper.GetSelectedMediaItem(0,0)
+    if global.selectedItem ~= item then
+        dbg("change")
+        global.selectedItem = item
+        itemSelectionChanged()
+    end
+
     muteTones()
     reaper.defer(loop)
 end
