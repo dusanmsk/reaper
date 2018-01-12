@@ -1,7 +1,6 @@
 --[[
-TODO: pevny pocet trackov
-TODO: nacitat PATTERN_DATA z midi clipu a pouzit ich
-TODO: scrolling
+TODO: status line on top
+TODO: pattern resolution
 TODO: beats for timing?
 
 scrolling spravit tak, ze sa idealne oddeli zobrazovaci mechanizmus do extra classy.
@@ -14,17 +13,25 @@ jeho vstupom bude pattern a offset v patterne, od ktoreho ma zacat.
 30 ppq = 1/128
  ]]
 
-FONTSIZE = 20
-TRACK_COLUMNS = 4
-NUM_OF_TRACKS = 8
+gui = {}
 
-DISPLAY_LINES = 32
+gui.fontsize = 20
+gui.trackColumns = 4
+gui.numOfTracks = 8
+gui.displayLines = 32
+gui.lineColOffset = 5
+gui.lineColWidth = 30
+gui.trackSize = 110
+gui.patternStartLine = 3
+gui.patternVisibleLines = 0
+
+gui.update = function()
+    gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
+    gui.patternVisibleLines = gui.displayLines - gui.patternStartLine
+end
 
 MIDI_CLIP_UPDATE_TIME = 0.5
 
-LINECOL_OFFSET = 5
-LINECOL_WIDTH = 30
-TRACK_SIZE = 110
 
 NOTE_OFF = -1
 
@@ -42,10 +49,12 @@ keycodes.homeKey = 1752132965
 keycodes.endKey = 6647396
 keycodes.deleteKey = 6579564
 keycodes.insertKey = 6909555
+keycodes.escKey = 27
 
 global = {}
 global.octave = 4
 global.selectedItem = nil
+global.selectionMode = false
 
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
@@ -60,11 +69,40 @@ tracks = {}
 pattern = {}
 pattern.steps = 0
 pattern.offset = 0
+pattern.scrollUp = function()
+    pattern.offset = pattern.offset - 1
+    if pattern.offset < 0 then pattern.offset = 0; end
+end
+pattern.scrollDown = function()
+    pattern.offset = pattern.offset + 1
+    if pattern.offset > pattern.steps - gui.patternVisibleLines then pattern.offset = pattern.steps - gui.patternVisibleLines; end
+end
 
 cursor = {}
 cursor.track = 0
 cursor.column = 0
 cursor.line = 0
+cursor.down = function()
+    cursor.line = cursor.line + 1
+    if cursor.line > gui.patternVisibleLines - 1 then cursor.line = gui.patternVisibleLines - 1; pattern.scrollDown(); end
+    -- todo
+end
+cursor.up = function()
+    -- todo
+    cursor.line = cursor.line - 1
+    if cursor.line < 0 then cursor.line = 0; pattern.scrollUp(); end
+end
+cursor.right = function()
+    cursor.column = cursor.column + 1
+    if cursor.column > gui.trackColumns - 1 then cursor.track = cursor.track + 1; cursor.column = 0; end
+    if cursor.track > gui.numOfTracks - 1 then cursor.track = 0 end
+end
+cursor.left = function()
+    cursor.column = cursor.column - 1
+    if cursor.column < 0 then cursor.track = cursor.track - 1; cursor.column = gui.trackColumns - 1; end
+    if cursor.track < 0 then cursor.track = gui.numOfTracks - 1; cursor.column = gui.trackColumns - 1; end
+end
+
 
 WHITE = { r = 0.8, g = 0.8, b = 0.8 }
 WHITE_BRIGHT = { r = 1.0, g = 1.0, b = 1.0 }
@@ -82,9 +120,9 @@ end
 
 function init()
     gfx.init("", 800, 800, 0)
-    gfx.setfont(1, "Monospace", FONTSIZE)
+    gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
-    --gfx.dock(1)
+    gfx.dock(1) -- todo store/restore
 
     -- get basic informations from currently edited take
     -- TODO change to selected item instead of opened midi editor
@@ -93,7 +131,7 @@ end
 function itemSelectionChanged()
 
     tracks = {}
-    for i = 0, NUM_OF_TRACKS, 1 do
+    for i = 0, gui.numOfTracks, 1 do
         tracks[i] = {}
     end
 
@@ -103,7 +141,7 @@ function itemSelectionChanged()
     pattern.offset = 0
 
     if global.selectedItem == nil then
-        pattern.steps=32
+        pattern.steps = 32
         update()
         return
     end
@@ -113,7 +151,6 @@ function itemSelectionChanged()
     pattern.steps = beatsToLines(fullbeatsOutOptional)
     loadMidiClip()
     update()
-
 end
 
 
@@ -137,7 +174,11 @@ function cellValue(fmt, value, nilValue)
 end
 
 function line2y(line)
-    return line * FONTSIZE
+    return line * gui.fontsize
+end
+
+function patternLine2y(patternLine)
+    return line2y(patternLine + gui.patternStartLine)
 end
 
 trackColumnOffset = {}
@@ -149,14 +190,14 @@ trackColumnOffset[4] = 100
 trackColumnOffset[5] = 200
 
 function trackCellX(trackNo, column)
-    local x = LINECOL_OFFSET + LINECOL_WIDTH
-    x = x + TRACK_SIZE * trackNo
+    local x = gui.lineColOffset + gui.lineColWidth
+    x = x + gui.trackSize * trackNo
     return x + trackColumnOffset[column]
 end
 
 function drawCell(trackNo, line, column, value)
     local x = trackCellX(trackNo, column)
-    local y = line2y(line)
+    local y = patternLine2y(line)
     if isSelected(line, trackNo, column) then
         local w, h = gfx.measurestr(value)
         setColor(GREEN)
@@ -192,7 +233,7 @@ end
 
 -- draw specified track
 function drawTrack(trackNo)
-    for line = 0, DISPLAY_LINES -1, 1 do
+    for line = 0, gui.patternVisibleLines - 1, 1 do
         drawTrackEntry(trackNo, line)
     end
 end
@@ -307,36 +348,25 @@ function processKeyboard()
     key = gfx.getchar()
     if key ~= 0 then
         muteTones(true)
-        -- dbg("Key pressed: " .. key)
+        dbg("Key pressed: " .. key)
     end
     return processKey(key)
 end
 
 function processKey(key)
-    if key == keycodes.downArrow then cursor.line = cursor.line + 1 end
-    if key == keycodes.upArrow then cursor.line = cursor.line - 1 end
-    if key == keycodes.rightArrow then cursor.column = cursor.column + 1 end
-    if key == keycodes.leftArrow then cursor.column = cursor.column - 1 end
+    if key == keycodes.downArrow then cursor.down() end
+    if key == keycodes.upArrow then cursor.up() end
+    if key == keycodes.rightArrow then cursor.right() end
+    if key == keycodes.leftArrow then cursor.left() end
     if key == keycodes.octaveUp then changeOctave(1) end
     if key == keycodes.octaveDown then changeOctave(-1) end
     if key == keycodes.deleteKey then deleteUnderCursor() end
     if key == keycodes.homeKey then pattern.offset = 0 end
-    if key == keycodes.endKey then pattern.offset = pattern.steps - DISPLAY_LINES; end
+    if key == keycodes.endKey then pattern.offset = pattern.steps - gui.patternVisibleLines; end
+    -- todo checks inside patter class
     if key == keycodes.pageDown then pattern.offset = pattern.offset + 8 end
     if key == keycodes.pageUp then pattern.offset = pattern.offset - 8 end
-
-    if cursor.line < 0 then cursor.line = 0; pattern.offset = pattern.offset - 1; end
-    if cursor.line > DISPLAY_LINES - 1 then cursor.line = DISPLAY_LINES - 1; pattern.offset = pattern.offset + 1; end
-
-    if pattern.offset < 0 then pattern.offset = 0; end
-    if pattern.offset > pattern.steps - DISPLAY_LINES  then pattern.offset = pattern.steps - DISPLAY_LINES ; end
-
-    -- jump cursor between tracks
-    if cursor.column > TRACK_COLUMNS - 1 then cursor.track = cursor.track + 1; cursor.column = 0; end
-    if cursor.column < 0 then cursor.track = cursor.track - 1; cursor.column = TRACK_COLUMNS - 1; end
-
-    if cursor.track < 0 then cursor.track = 0; cursor.column = 0; end
-    -- TODO if track > num of tracks
+    if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
 
     -- todo if track note column selected
     notePressed(key)
@@ -401,7 +431,7 @@ end
 -- loads data from midi clip
 function loadMidiClip()
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
-    for trackNo = 0, NUM_OF_TRACKS - 1, 1 do
+    for trackNo = 0, gui.numOfTracks - 1, 1 do
         for noteIdx = 0, notecnt - 1, 1 do
             retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(pattern.take, noteIdx)
             if chan == trackNo then
@@ -409,7 +439,7 @@ function loadMidiClip()
                 lineend = ppq2line(endppqpos)
 
                 -- place noteoff into pattern
-                rec = getOrCreateRecord(trackNo, lineend+1)
+                rec = getOrCreateRecord(trackNo, lineend + 1)
                 -- dbg("noteoff placed at " .. lineend)
                 rec.pitch = NOTE_OFF
 
@@ -417,7 +447,6 @@ function loadMidiClip()
                 rec = getOrCreateRecord(trackNo, linestart)
                 rec.pitch = pitch
                 rec.velocity = vel
-
             end
         end
         -- TODO grid size
@@ -437,7 +466,7 @@ function saveMidiClip()
     end
 
     -- write new events to midi clip
-    for trackNo = 0, NUM_OF_TRACKS, 1 do
+    for trackNo = 0, gui.numOfTracks, 1 do
         track = tracks[trackNo]
         for lineNo, record in pairs(track) do
             if record ~= nil then
@@ -458,38 +487,38 @@ function saveMidiClip()
 end
 
 function setColorByLine(lineno)
-    if lineno % 8 == 0 then
+    if lineno % 4 == 0 then
         setColor(WHITE_BRIGHT)
     else
         setColor(WHITE)
     end
 end
 
-function drawLineNumber(lineno)
+function drawPatternLineNumber(lineno)
     setColorByLine(lineno)
-    gfx.x = LINECOL_OFFSET
-    gfx.y = line2y(lineno)
-    gfx.printf("%02d", lineno + pattern.offset )
+    gfx.x = gui.lineColOffset
+    gfx.y = patternLine2y(lineno)
+    gfx.printf("%02d", lineno + pattern.offset)
 end
 
 function drawAllTracks()
+    dbg(gui.patternVisibleLines)
     -- line numbers
-    for idx = 0, DISPLAY_LINES -1, 1 do
-        drawLineNumber(idx)
+    for idx = 0, gui.patternVisibleLines - 1, 1 do
+        drawPatternLineNumber(idx)
     end
     -- all tracks
-    for i = 0, NUM_OF_TRACKS - 1, 1 do
+    for i = 0, gui.numOfTracks - 1, 1 do
         drawTrack(i)
     end
 end
 
 
 function update()
-    DISPLAY_LINES = math.floor(gfx.h / FONTSIZE) - 1
-    if  pattern.steps < DISPLAY_LINES then DISPLAY_LINES = pattern.steps; end
+    gui.update()
+    if pattern.steps < gui.displayLines then gui.displayLines = pattern.steps - gui.patternStartLine; end
     drawAllTracks()
     gfx.clear = 0 -- background color
-    gfx.update()
 end
 
 
@@ -505,7 +534,7 @@ function loop()
         lastUpdateTime = lastEditTime
     end
 
-    item = reaper.GetSelectedMediaItem(0,0)
+    item = reaper.GetSelectedMediaItem(0, 0)
     if global.selectedItem ~= item then
         dbg("change")
         global.selectedItem = item
@@ -513,6 +542,7 @@ function loop()
     end
 
     muteTones()
+    gfx.update()
     reaper.defer(loop)
 end
 
@@ -529,6 +559,6 @@ for idx, rec in ipairs(records) do
     dbg(rec.pitch)
     drawLineNo(10, y, idx)
     drawNote(x, y, rec.pitch, rec.velocity, rec.f1, rec.f2)
-    y = y + FONTSIZE
+    y = y + gui.fontsize
 end
 ]]
