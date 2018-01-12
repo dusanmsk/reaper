@@ -1,10 +1,12 @@
 --[[
-TODO: status line on top
-TODO: beats for timing?
+Keys:
+f2 - decrease grid size
+f3 - increase grid size
+f4 - turn on loud mode
+space - toggle play
 
-scrolling spravit tak, ze sa idealne oddeli zobrazovaci mechanizmus do extra classy.
-jeho vstupom bude pattern a offset v patterne, od ktoreho ma zacat.
-(napr. ak ma pattern 128 riadkov a zobrazuje sa len 32)
+TODO: zase zobrazuje o riadok viac
+
 
 ]]
 
@@ -24,11 +26,16 @@ gui.trackSize = 110
 gui.patternStartLine = 3
 gui.patternVisibleLines = 0
 gui.selectionMode = false
+gui.loudMode = false
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
     gui.patternVisibleLines = gui.displayLines - gui.patternStartLine
     if gui.patternVisibleLines > patternLength then gui.patternVisibleLines = patternLength end
+end
+
+gui.toOnOffString = function(value)
+    return value == false and 'off' or 'on'
 end
 
 MIDI_CLIP_UPDATE_TIME = 0.5
@@ -51,8 +58,11 @@ keycodes.endKey = 6647396
 keycodes.deleteKey = 6579564
 keycodes.insertKey = 6909555
 keycodes.escKey = 27
+keycodes.enter = 13
 keycodes.f2 = 26162
 keycodes.f3 = 26163
+keycodes.f4 = 26164
+keycodes.space = 32
 
 global = {}
 global.octave = 4
@@ -135,6 +145,12 @@ function beatsToLines(beats)
     return math.floor(pattern.linesPerBeat * beats)
 end
 
+function linesToBeats(lines)
+    if lines == 0 then return 0 end
+    return lines / pattern.linesPerBeat
+end
+
+
 function init()
     gfx.init("", 800, 800, 0)
     gfx.setfont(1, "Monospace", gui.fontsize)
@@ -145,7 +161,7 @@ function init()
     -- TODO change to selected item instead of opened midi editor
 end
 
-function itemSelectionChanged()
+function itemSelectionChanged(parseSysex)
 
     tracks = {}
     for i = 0, gui.numOfTracks, 1 do
@@ -166,7 +182,7 @@ function itemSelectionChanged()
     pattern.take = reaper.GetMediaItemTake(global.selectedItem, 0)
     retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
     pattern.steps = beatsToLines(fullbeatsOutOptional) + 1
-    loadMidiClip()
+    loadMidiClip(parseSysex)
     update()
 end
 
@@ -341,10 +357,8 @@ function notePressed(key)
         if rec.pitch ~= NOTE_OFF then
             rec.velocity = 50
         end
-        processKey(keycodes.downArrow)
-
         generateTone(rec.pitch)
-
+        cursor.down()
         emitEdited()
     end
 end
@@ -361,17 +375,30 @@ function isKey(key, ch)
     return string.byte(ch) == key
 end
 
-function decrementGrid()
-    -- todo do not allow to decrement when real midi clip notes grid is smaller
-    pattern.linesPerBeat = pattern.linesPerBeat / 2
-    if pattern.linesPerBeat < 1 then pattern.linesPerBeat = 1 end
-    itemSelectionChanged()
-end
-
 function incrementGrid()
     pattern.linesPerBeat = pattern.linesPerBeat * 2
     if pattern.linesPerBeat > 64 then pattern.linesPerBeat = 64 end
-    itemSelectionChanged()
+    savePatternSysexProperties()
+    itemSelectionChanged(false)
+end
+
+function decrementGrid()
+    -- todo do not allow to decrement when real midi clip notes grid is smaller
+    pattern.linesPerBeat = math.floor(pattern.linesPerBeat / 2)
+    if pattern.linesPerBeat < 1 then pattern.linesPerBeat = 1 end
+    savePatternSysexProperties()
+    itemSelectionChanged(false)
+end
+
+
+function playSelectedLine()
+    if gui.loudMode then
+        dbg("play")
+        rec = getOrCreateRecord(cursor.track, recordIndex(cursor.line))
+        if rec ~= nil and rec.pitch ~= nil then
+            generateTone(rec.pitch)
+        end
+    end
 end
 
 function processKeyboard()
@@ -385,8 +412,8 @@ end
 function processKey(key)
     if key ~= 0 then
         dbg("Key press: " .. key)
-        if key == keycodes.downArrow then cursor.down() end
-        if key == keycodes.upArrow then cursor.up() end
+        if key == keycodes.downArrow then cursor.down(); playSelectedLine(); end
+        if key == keycodes.upArrow then cursor.up(); playSelectedLine(); end
         if key == keycodes.rightArrow then cursor.right() end
         if key == keycodes.leftArrow then cursor.left() end
         if key == keycodes.octaveUp then changeOctave(1) end
@@ -400,11 +427,24 @@ function processKey(key)
         if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
         if key == keycodes.f2 then decrementGrid() end
         if key == keycodes.f3 then incrementGrid() end
+        if key == keycodes.f4 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.space then reaperTogglePlay() end
 
         notePressed(key)
         return true
     end
     return false
+end
+
+function reaperTogglePlay()
+    -- todo seek cursor
+    local cursorLinePosition = recordIndex(cursor.line)
+    local beats = linesToBeats(cursorLinePosition)
+    local patternItemPositionSec = reaper.TimeMap2_beatsToTime(0, beats, 0)
+    local itemPositionSec = reaper.GetMediaItemInfo_Value(global.selectedItem, "D_POSITION")
+    local globalPositionSec = itemPositionSec + patternItemPositionSec
+    reaper.Main_OnCommand(40044, 0)
+    reaper.SetEditCurPos(globalPositionSec, true, true)
 end
 
 function line2ppq(lineNo)
@@ -463,8 +503,12 @@ end
 
 
 -- loads data from midi clip
-function loadMidiClip()
-    -- todo detect grid size from shortest midi note
+function loadMidiClip(parseSysex)
+    -- read pattern properties from sysex
+    if parseSysex then
+        loadPatternSysexProperties()
+    end
+    -- read notes
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
     for trackNo = 0, gui.numOfTracks - 1, 1 do
         for noteIdx = 0, notecnt - 1, 1 do
@@ -519,7 +563,30 @@ function saveMidiClip()
             end
         end
     end
+
+    -- write pattern settings into sysex event
+    savePatternSysexProperties()
     reaper.Undo_EndBlock2(0, "Pattern editor", 0)
+end
+
+function savePatternSysexProperties()
+    reaper.Undo_BeginBlock2(0)
+    for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, i) end
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 1, 1, pattern.linesPerBeat)
+    -- todo more properties
+    reaper.Undo_EndBlock2(0, "Pattern properties", 0)
+end
+
+function loadPatternSysexProperties()
+    local prop = getSysexProperty(0)
+    if prop then      pattern.linesPerBeat = tonumber(prop) or 8 end
+    if pattern.linesPerBeat == nil then pattern.linesPerBeat = 8 end
+    -- todo more properties
+end
+
+function getSysexProperty(idx)
+    retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, idx)
+    return data:sub(0,data:len()-1)
 end
 
 function setColorByLine(lineno)
@@ -552,7 +619,7 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: %02d\nEdit mode: %s", pattern.linesPerBeat, (gui.selectionMode == false and 'off' or 'on'))
+    gfx.printf("Grid: %02d  Edit mode: %s  Loud mode: %s", pattern.linesPerBeat, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode))
 end
 
 
@@ -580,7 +647,7 @@ function loop()
     item = reaper.GetSelectedMediaItem(0, 0)
     if global.selectedItem ~= item then
         global.selectedItem = item
-        itemSelectionChanged()
+        itemSelectionChanged(true)
     end
 
     muteTones()
