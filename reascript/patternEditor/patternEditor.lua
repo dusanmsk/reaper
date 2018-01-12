@@ -25,9 +25,10 @@ gui.trackSize = 110
 gui.patternStartLine = 3
 gui.patternVisibleLines = 0
 
-gui.update = function()
+gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
     gui.patternVisibleLines = gui.displayLines - gui.patternStartLine
+    if gui.patternVisibleLines > patternLength then gui.patternVisibleLines = patternLength end
 end
 
 MIDI_CLIP_UPDATE_TIME = 0.5
@@ -348,7 +349,6 @@ function processKeyboard()
     key = gfx.getchar()
     if key ~= 0 then
         muteTones(true)
-        dbg("Key pressed: " .. key)
     end
     return processKey(key)
 end
@@ -502,7 +502,6 @@ function drawPatternLineNumber(lineno)
 end
 
 function drawAllTracks()
-    dbg(gui.patternVisibleLines)
     -- line numbers
     for idx = 0, gui.patternVisibleLines - 1, 1 do
         drawPatternLineNumber(idx)
@@ -515,7 +514,7 @@ end
 
 
 function update()
-    gui.update()
+    gui.update(pattern.steps)
     if pattern.steps < gui.displayLines then gui.displayLines = pattern.steps - gui.patternStartLine; end
     drawAllTracks()
     gfx.clear = 0 -- background color
@@ -536,7 +535,6 @@ function loop()
 
     item = reaper.GetSelectedMediaItem(0, 0)
     if global.selectedItem ~= item then
-        dbg("change")
         global.selectedItem = item
         itemSelectionChanged()
     end
