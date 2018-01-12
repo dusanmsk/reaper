@@ -1,4 +1,5 @@
 --[[
+TODO: opravit mriezku WHITE_BRIGHT
 TODO: status line on top
 TODO: pattern resolution
 TODO: beats for timing?
@@ -24,6 +25,7 @@ gui.lineColWidth = 30
 gui.trackSize = 110
 gui.patternStartLine = 3
 gui.patternVisibleLines = 0
+gui.selectionMode = false
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
@@ -51,11 +53,12 @@ keycodes.endKey = 6647396
 keycodes.deleteKey = 6579564
 keycodes.insertKey = 6909555
 keycodes.escKey = 27
+keycodes.f2 = 26162
+keycodes.f3 = 26163
 
 global = {}
 global.octave = 4
 global.selectedItem = nil
-global.selectionMode = false
 
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
@@ -70,6 +73,7 @@ tracks = {}
 pattern = {}
 pattern.steps = 0
 pattern.offset = 0
+pattern.linesPerBeat = 16
 pattern.scrollUp = function()
     pattern.offset = pattern.offset - 1
     if pattern.offset < 0 then pattern.offset = 0; end
@@ -103,6 +107,20 @@ cursor.left = function()
     if cursor.column < 0 then cursor.track = cursor.track - 1; cursor.column = gui.trackColumns - 1; end
     if cursor.track < 0 then cursor.track = gui.numOfTracks - 1; cursor.column = gui.trackColumns - 1; end
 end
+cursor.pageDown = function()
+    pattern.offset = pattern.offset + pattern.linesPerBeat * 2
+    if pattern.offset > pattern.steps - gui.patternVisibleLines then
+        pattern.offset = pattern.steps - gui.patternVisibleLines
+        cursor.line = gui.patternVisibleLines - 1
+    end
+end
+cursor.pageUp = function()
+    pattern.offset = pattern.offset - pattern.linesPerBeat * 2
+    if (pattern.offset < 0) then
+        pattern.offset = 0
+        cursor.line = 0
+    end
+end
 
 
 WHITE = { r = 0.8, g = 0.8, b = 0.8 }
@@ -116,7 +134,7 @@ end
 
 
 function beatsToLines(beats)
-    return math.floor(4 * beats)
+    return math.floor(pattern.linesPerBeat * beats)
 end
 
 function init()
@@ -345,6 +363,19 @@ function isKey(key, ch)
     return string.byte(ch) == key
 end
 
+function decrementGrid()
+    -- todo do not allow to decrement when real midi clip notes grid is smaller
+    pattern.linesPerBeat = pattern.linesPerBeat / 2
+    if pattern.linesPerBeat < 1 then pattern.linesPerBeat = 1 end
+    itemSelectionChanged()
+end
+
+function incrementGrid()
+    pattern.linesPerBeat = pattern.linesPerBeat * 2
+    if pattern.linesPerBeat > 64 then pattern.linesPerBeat = 64 end
+    itemSelectionChanged()
+end
+
 function processKeyboard()
     key = gfx.getchar()
     if key ~= 0 then
@@ -354,33 +385,38 @@ function processKeyboard()
 end
 
 function processKey(key)
-    if key == keycodes.downArrow then cursor.down() end
-    if key == keycodes.upArrow then cursor.up() end
-    if key == keycodes.rightArrow then cursor.right() end
-    if key == keycodes.leftArrow then cursor.left() end
-    if key == keycodes.octaveUp then changeOctave(1) end
-    if key == keycodes.octaveDown then changeOctave(-1) end
-    if key == keycodes.deleteKey then deleteUnderCursor() end
-    if key == keycodes.homeKey then pattern.offset = 0 end
-    if key == keycodes.endKey then pattern.offset = pattern.steps - gui.patternVisibleLines; end
-    -- todo checks inside patter class
-    if key == keycodes.pageDown then pattern.offset = pattern.offset + 8 end
-    if key == keycodes.pageUp then pattern.offset = pattern.offset - 8 end
-    if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
+    if key ~= 0 then
+        dbg("Key press: " .. key)
+        if key == keycodes.downArrow then cursor.down() end
+        if key == keycodes.upArrow then cursor.up() end
+        if key == keycodes.rightArrow then cursor.right() end
+        if key == keycodes.leftArrow then cursor.left() end
+        if key == keycodes.octaveUp then changeOctave(1) end
+        if key == keycodes.octaveDown then changeOctave(-1) end
+        if key == keycodes.deleteKey then deleteUnderCursor() end
+        if key == keycodes.homeKey then pattern.offset = 0 end
+        if key == keycodes.endKey then pattern.offset = pattern.steps - gui.patternVisibleLines end
+        -- todo checks inside patter class
+        if key == keycodes.pageDown then cursor.pageDown() end
+        if key == keycodes.pageUp then cursor.pageUp() end
+        if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
+        if key == keycodes.f2 then decrementGrid() end
+        if key == keycodes.f3 then incrementGrid() end
 
-    -- todo if track note column selected
-    notePressed(key)
-    return key ~= 0
+        notePressed(key)
+        return true
+    end
+    return false
 end
 
 function line2ppq(lineNo)
     -- todo grid size
-    return math.floor(lineNo * 240)
+    return math.floor(lineNo * 480 / pattern.linesPerBeat * 2)
 end
 
 function ppq2line(ppq)
     -- todo grid size
-    return math.floor(ppq / 240)
+    return math.floor(ppq / 480 * pattern.linesPerBeat / 2)
 end
 
 
@@ -416,7 +452,7 @@ function getTakeLengthPPQ(take)
     return reaper.MIDI_GetPPQPosFromProjTime(take, len_sec)
 end
 
-function getNoteLength(track, lineNo)
+function getNoteLengthLines(track, lineNo)
     -- iterate over track, note length is until (new note or note_off or pattern end) occure
     for i = lineNo + 1, pattern.steps, 1 do
         rec = track[i]
@@ -430,6 +466,7 @@ end
 
 -- loads data from midi clip
 function loadMidiClip()
+    -- todo detect grid size from shortest midi note
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
     for trackNo = 0, gui.numOfTracks - 1, 1 do
         for noteIdx = 0, notecnt - 1, 1 do
@@ -471,7 +508,7 @@ function saveMidiClip()
         for lineNo, record in pairs(track) do
             if record ~= nil then
                 if record.pitch ~= nil and record.pitch ~= NOTE_OFF then
-                    noteLength = getNoteLength(track, lineNo)
+                    noteLength = getNoteLengthLines(track, lineNo)
                     reaper.MIDI_InsertNote(pattern.take, false, false,
                         line2ppq(lineNo),
                         line2ppq(lineNo) + line2ppq(noteLength) - 1,
@@ -487,7 +524,7 @@ function saveMidiClip()
 end
 
 function setColorByLine(lineno)
-    if lineno % 4 == 0 then
+    if lineno % pattern.linesPerBeat == 0 then
         setColor(WHITE_BRIGHT)
     else
         setColor(WHITE)
@@ -512,12 +549,20 @@ function drawAllTracks()
     end
 end
 
+function drawMenus()
+    setColor(WHITE)
+    gfx.x = 0
+    gfx.y = 0
+    gfx.printf("Grid: %02d\nEdit mode: %s", pattern.linesPerBeat, (gui.selectionMode == false and 'off' or 'on'))
+end
+
 
 function update()
     gui.update(pattern.steps)
-    if pattern.steps < gui.displayLines then gui.displayLines = pattern.steps - gui.patternStartLine; end
+    drawMenus()
     drawAllTracks()
     gfx.clear = 0 -- background color
+    gfx.update()
 end
 
 
@@ -540,7 +585,7 @@ function loop()
     end
 
     muteTones()
-    gfx.update()
+    -- update()
     reaper.defer(loop)
 end
 
