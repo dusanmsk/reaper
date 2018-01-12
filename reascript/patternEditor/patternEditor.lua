@@ -1,7 +1,5 @@
 --[[
-TODO: opravit mriezku WHITE_BRIGHT
 TODO: status line on top
-TODO: pattern resolution
 TODO: beats for timing?
 
 scrolling spravit tak, ze sa idealne oddeli zobrazovaci mechanizmus do extra classy.
@@ -167,7 +165,7 @@ function itemSelectionChanged()
     itemLengthSec = reaper.GetMediaItemInfo_Value(global.selectedItem, 'D_LENGTH')
     pattern.take = reaper.GetMediaItemTake(global.selectedItem, 0)
     retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-    pattern.steps = beatsToLines(fullbeatsOutOptional)
+    pattern.steps = beatsToLines(fullbeatsOutOptional) + 1
     loadMidiClip()
     update()
 end
@@ -225,7 +223,7 @@ function drawCell(trackNo, line, column, value)
         gfx.x = x; gfx.y = y
         gfx.printf(value)
     else
-        setColorByLine(line)
+        setColorByLine(line + pattern.offset)
         gfx.x = x; gfx.y = y
         gfx.printf(value)
     end
@@ -509,6 +507,7 @@ function saveMidiClip()
             if record ~= nil then
                 if record.pitch ~= nil and record.pitch ~= NOTE_OFF then
                     noteLength = getNoteLengthLines(track, lineNo)
+                    -- dbg("note length " .. noteLength)
                     reaper.MIDI_InsertNote(pattern.take, false, false,
                         line2ppq(lineNo),
                         line2ppq(lineNo) + line2ppq(noteLength) - 1,
@@ -532,7 +531,7 @@ function setColorByLine(lineno)
 end
 
 function drawPatternLineNumber(lineno)
-    setColorByLine(lineno)
+    setColorByLine(lineno + pattern.offset)
     gfx.x = gui.lineColOffset
     gfx.y = patternLine2y(lineno)
     gfx.printf("%02d", lineno + pattern.offset)
