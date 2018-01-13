@@ -10,7 +10,6 @@ TODO:   - storage pre track bude vzdy 1 step = 1/128
         - pokial sa v patterne nachadza zaznam mimo grid, zobrazi sa v danom riadku upozornenie
 
 
-TODO:   swing
 TODO:   grid size zobrazovat ako 1/32 atd...
 
 ]]
@@ -204,7 +203,7 @@ function init()
     gfx.init("", 800, 800, 0)
     gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
-    gfx.dock(1) -- todo store/restore
+    -- gfx.dock(1) -- todo store/restore
 
     pattern.tracks = {}
     for i = 0, gui.numOfTracks, 1 do
@@ -219,14 +218,16 @@ function init()
     pattern.editor = reaper.MIDIEditor_GetActive()
     if pattern.editor then
         pattern.take = reaper.MIDIEditor_GetTake(pattern.editor)
-        dbg(pattern.take)
         pattern.item = reaper.GetMediaItemTake_Item(pattern.take)
-        dbg(pattern.item)
         itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
         retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-        pattern.init(beatsToPatternSteps(fullbeatsOutOptional))
-        pattern.swing = 0
-        loadMidiClip(parseSysex)
+        pattern.init(beatsToPatternSteps(fullbeatsOutOptional) - 1)
+        --retval, swingOutOptional, noteLenOutOptional = reaper.MIDI_GetGrid(pattern.take)
+        --dbg("swing " .. swingOutOptional)
+        --dbg("notelen " .. noteLenOutOptional)
+        local gridNoteLen = reaper.MIDIEditor_GetSetting_int(pattern.editor, "default_note_len")
+        dbg(gridNoteLen)
+        -- todo calculate grid size from note length
         update()
     end
 end
@@ -424,26 +425,13 @@ end
 function decrementGrid()
     gui.gridSize = gui.gridSize * 2
     if gui.gridSize > 128 then gui.gridSize = 128 end
-    savePatternSysexProperties()
+    -- todo update grid (use SWS commands to set it)
 end
 
 function incrementGrid()
     gui.gridSize = gui.gridSize / 2
     if gui.gridSize < 1 then gui.gridSize = 1 end
-    savePatternSysexProperties()
-end
-
-
-function incrementSwing()
-    pattern.swing = pattern.swing + 1;
-    if pattern.swing > 50 then pattern.swing = 50 end -- note internal max value is 50, shown as 100 in gui
-    emitEdited()
-end
-
-function decrementSwing()
-    pattern.swing = pattern.swing - 1;
-    if pattern.swing < 0 then pattern.swing = 0 end
-    emitEdited()
+    -- todo update grid (use SWS commands to set it)
 end
 
 function incrementStepSize()
@@ -458,7 +446,6 @@ end
 
 function playSelectedLine()
     if gui.loudMode then
-        dbg("play")
         rec = getOrCreateRecord(cursor.track, recordIndex(cursor.line))
         if rec ~= nil and rec.pitch ~= nil then
             generateTone(rec.pitch)
@@ -476,7 +463,6 @@ end
 
 function processKey(key)
     if key ~= 0 then
-        dbg("Key press: " .. key)
         if key == keycodes.downArrow then cursor.down(); playSelectedLine(); end
         if key == keycodes.upArrow then cursor.up(); playSelectedLine(); end
         if key == keycodes.rightArrow then cursor.right() end
@@ -492,11 +478,9 @@ function processKey(key)
         if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
         if key == keycodes.f2 then decrementGrid() end
         if key == keycodes.f3 then incrementGrid() end
-        if key == keycodes.f4 then decrementSwing() end
-        if key == keycodes.f5 then incrementSwing() end
-        if key == keycodes.f6 then decrementStepSize() end
-        if key == keycodes.f7 then incrementStepSize() end
-        if key == keycodes.f8 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f4 then decrementStepSize() end
+        if key == keycodes.f5 then incrementStepSize() end
+        if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
         if key == keycodes.space then reaperTogglePlay() end
 
         notePressed(key)
@@ -562,16 +546,12 @@ end
 
 
 -- loads data from midi clip
-function loadMidiClip(parseSysex)
+function loadMidiClip()
 
     -- todo unquantize original midi clip by reaper action before read
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40003)      -- select all
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40402)      -- unquantize
+    reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
+    reaper.MIDIEditor_OnCommand(pattern.editor, 40402) -- unquantize
 
-    -- read pattern properties from sysex
-    if parseSysex then
-        loadPatternSysexProperties()
-    end
     -- read notes
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
     for trackNo = 0, gui.numOfTracks - 1, 1 do
@@ -580,31 +560,22 @@ function loadMidiClip(parseSysex)
             if chan == trackNo then
                 posStart = ppq2patternPosition(startppqpos)
                 posEnd = ppq2patternPosition(endppqpos)
-                --[[
-                    -- todo "quantize" during parsing - will de-swing swinged midi clip
-                    -- round by 0.5 down or up
-                    linestart = round(linestart)
-                    lineend = round(lineend)
-                ]]
+
                 -- place noteoff into pattern
                 if posStart < pattern.steps and posEnd < pattern.steps then
                     rec = {}
                     rec.pitch = NOTE_OFF
-                    dbg(posEnd)
                     pattern.setRecord(posEnd, trackNo, rec)
-                    dbg("noteoff placed at " .. posEnd)
 
                     -- place note into pattern
                     rec = {}
                     rec.pitch = pitch
                     rec.velocity = vel
                     pattern.setRecord(posStart, trackNo, rec)
-                    dbg("note placed at " .. posStart)
                 end
             end
         end
         -- TODO grid size
-        -- TODO swing?
     end
 
     -- save it back again (applies quantization etc...)
@@ -629,17 +600,6 @@ function saveMidiClip()
                 if record.pitch ~= nil and record.pitch ~= NOTE_OFF then
                     noteStart = patternPosition
                     noteLength = getPatternNoteLength(patternPosition, trackNo)
-                    --[[
-                        swing disabled, will use reaper actions to re-swing it
-                        if pattern.swing > 0 then
-                            if patternPosition % 2 == 0 then
-                                noteLength = noteLength + pattern.swing / 100
-                            else
-                                noteStart = noteStart + pattern.swing / 100
-                                noteLength = noteLength - pattern.swing / 100
-                            end
-                        end
-                    ]]
                     reaper.MIDI_InsertNote(pattern.take, false, false,
                         patternPosition2ppq(noteStart),
                         patternPosition2ppq(noteStart) + patternPosition2ppq(noteLength),
@@ -652,39 +612,11 @@ function saveMidiClip()
         end
     end
 
-    -- write pattern settings into sysex event
-    savePatternSysexProperties()
     reaper.Undo_EndBlock2(0, "Pattern editor", 0)
 
     -- todo is swing then call quantize on midi editor
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40003)      -- select all
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40729)      -- quantize to grid
-end
-
-function savePatternSysexProperties()
-    reaper.Undo_BeginBlock2(0)
-    for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
-    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, gui.gridSize)
-    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.swing)
-    reaper.Undo_EndBlock2(0, "Pattern properties", 0)
-end
-
-function loadPatternSysexProperties()
-    local prop
-    prop = getSysexProperty(0)
-    if prop then gui.gridSize = tonumber(prop) or 8 end
-    if gui.gridSize == nil or gui.gridSize < 1 then gui.gridSize = 8 end
-
-    prop = getSysexProperty(1)
-    if prop then pattern.swing = tonumber(prop) or 0 end
-
-    -- todo more properties
-end
-
-
-function getSysexProperty(idx)
-    retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, idx)
-    return data:sub(0, data:len() - 1)
+    reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
+    reaper.MIDIEditor_OnCommand(pattern.editor, 40729) -- quantize to grid
 end
 
 function setColorByLine(lineno)
@@ -731,7 +663,7 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Swing: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode), pattern.swing * 2)
+    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode))
 end
 
 
@@ -766,14 +698,3 @@ init()
 --debugColumns()
 loop()
 
-
---draw(0,0, "C-4", 60, 250, 88)
---dbg(records[1].b)
---[[x = 40; y = 10
-for idx, rec in ipairs(records) do
-    dbg(rec.pitch)
-    drawLineNo(10, y, idx)
-    drawNote(x, y, rec.pitch, rec.velocity, rec.f1, rec.f2)
-    y = y + gui.fontsize
-end
-]]
