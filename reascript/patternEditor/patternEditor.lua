@@ -5,7 +5,8 @@ f3 - increase grid size
 f4 - turn on loud mode
 space - toggle play
 
-TODO: zase zobrazuje o riadok viac
+TODO:   vratit sa k ukladaniu celeho patternu do sysex-u a jeho generovaniu,
+        tzn. nebude sa vobec parsovat midi klip
 
 TODO:   swing
 TODO:   grid size zobrazovat ako 1/32 atd...
@@ -29,6 +30,7 @@ gui.patternStartLine = 3
 gui.patternVisibleLines = 0
 gui.selectionMode = false
 gui.loudMode = false
+gui.stepSize = 1
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
@@ -66,6 +68,8 @@ keycodes.f3 = 26163
 keycodes.f4 = 26164
 keycodes.f5 = 26165
 keycodes.f6 = 26166
+keycodes.f7 = 26167
+keycodes.f8 = 26168
 
 keycodes.space = 32
 
@@ -101,14 +105,18 @@ cursor.track = 0
 cursor.column = 0
 cursor.line = 0
 cursor.down = function()
-    cursor.line = cursor.line + 1
-    if cursor.line > gui.patternVisibleLines - 1 then cursor.line = gui.patternVisibleLines - 1; pattern.scrollDown(); end
+    for i = 1, gui.stepSize, 1 do
+        cursor.line = cursor.line + 1
+        if cursor.line > gui.patternVisibleLines - 1 then cursor.line = gui.patternVisibleLines - 1; pattern.scrollDown(); end
+    end
     -- todo
 end
 cursor.up = function()
     -- todo
-    cursor.line = cursor.line - 1
-    if cursor.line < 0 then cursor.line = 0; pattern.scrollUp(); end
+    for i = 1, gui.stepSize, 1 do
+        cursor.line = cursor.line - 1
+        if cursor.line < 0 then cursor.line = 0; pattern.scrollUp(); end
+    end
 end
 cursor.right = function()
     cursor.column = cursor.column + 1
@@ -121,14 +129,14 @@ cursor.left = function()
     if cursor.track < 0 then cursor.track = gui.numOfTracks - 1; cursor.column = gui.trackColumns - 1; end
 end
 cursor.pageDown = function()
-    pattern.offset = pattern.offset + pattern.linesPerBeat * 2
+    pattern.offset = pattern.offset + gui.patternVisibleLines
     if pattern.offset > pattern.steps - gui.patternVisibleLines then
         pattern.offset = pattern.steps - gui.patternVisibleLines
         cursor.line = gui.patternVisibleLines - 1
     end
 end
 cursor.pageUp = function()
-    pattern.offset = pattern.offset - pattern.linesPerBeat * 2
+    pattern.offset = pattern.offset - gui.patternVisibleLines
     if (pattern.offset < 0) then
         pattern.offset = 0
         cursor.line = 0
@@ -407,17 +415,28 @@ end
 
 
 function incrementSwing()
-    pattern.swing = pattern.swing + 1;
-    if pattern.swing > 99 then pattern.swing = 99 end
-    emitEdited()
+    -- todo disabled until midi clip parsing will be 100% working
+    --pattern.swing = pattern.swing + 1;
+    --if pattern.swing > 50 then pattern.swing = 50 end       -- note internal max value is 50, shown as 100 in gui
+    --emitEdited()
 end
 
 function decrementSwing()
-    pattern.swing = pattern.swing - 1;
-    if pattern.swing < 0 then pattern.swing = 0 end
-    emitEdited()
+    -- todo disabled until midi clip parsing will be 100% working
+    --pattern.swing = pattern.swing - 1;
+    --if pattern.swing < 0 then pattern.swing = 0 end
+    --emitEdited()
 end
 
+function incrementStepSize()
+    gui.stepSize = gui.stepSize + 1
+    if gui.stepSize > pattern.steps then gui.stepSize = pattern.steps end
+end
+
+function decrementStepSize()
+    gui.stepSize = gui.stepSize - 1
+    if gui.stepSize < 0 then gui.stepSize = 0 end
+end
 
 function playSelectedLine()
     if gui.loudMode then
@@ -457,7 +476,9 @@ function processKey(key)
         if key == keycodes.f3 then incrementGrid() end
         if key == keycodes.f4 then decrementSwing() end
         if key == keycodes.f5 then incrementSwing() end
-        if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f6 then decrementStepSize() end
+        if key == keycodes.f7 then incrementStepSize() end
+        if key == keycodes.f8 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
         if key == keycodes.space then reaperTogglePlay() end
 
         notePressed(key)
@@ -650,7 +671,7 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: %02d  Edit mode: %s  Loud mode: %s  Swing: %s", pattern.linesPerBeat, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode), pattern.swing)
+    gfx.printf("Grid: %02d  Step: %s  Edit mode: %s  Loud mode: %s  Swing: %s", pattern.linesPerBeat, gui.stepSize, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode), pattern.swing * 2)
 end
 
 
