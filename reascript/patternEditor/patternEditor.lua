@@ -7,6 +7,8 @@ space - toggle play
 
 TODO: zase zobrazuje o riadok viac
 
+TODO:   swing
+TODO:   grid size zobrazovat ako 1/32 atd...
 
 ]]
 
@@ -62,6 +64,9 @@ keycodes.enter = 13
 keycodes.f2 = 26162
 keycodes.f3 = 26163
 keycodes.f4 = 26164
+keycodes.f5 = 26165
+keycodes.f6 = 26166
+
 keycodes.space = 32
 
 global = {}
@@ -181,7 +186,7 @@ function itemSelectionChanged(parseSysex)
     itemLengthSec = reaper.GetMediaItemInfo_Value(global.selectedItem, 'D_LENGTH')
     pattern.take = reaper.GetMediaItemTake(global.selectedItem, 0)
     retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-    pattern.steps = beatsToLines(fullbeatsOutOptional) + 1
+    pattern.steps = beatsToLines(fullbeatsOutOptional)
     loadMidiClip(parseSysex)
     update()
 end
@@ -269,6 +274,11 @@ function drawTrack(trackNo)
     for line = 0, gui.patternVisibleLines - 1, 1 do
         drawTrackEntry(trackNo, line)
     end
+end
+
+function getRecord(trackNo, line)
+    trackData = tracks[trackNo]
+    return trackData[line]
 end
 
 function getOrCreateRecord(trackNo, line)
@@ -383,11 +393,29 @@ function incrementGrid()
 end
 
 function decrementGrid()
+    local newLinesPerBeat = math.floor(pattern.linesPerBeat / 2)
     -- todo do not allow to decrement when real midi clip notes grid is smaller
-    pattern.linesPerBeat = math.floor(pattern.linesPerBeat / 2)
+    if not decrementLinesPerBeatPossible() then
+        -- todo show error or only disallow to decrenment?
+        return
+    end
+    pattern.linesPerBeat = newLinesPerBeat
     if pattern.linesPerBeat < 1 then pattern.linesPerBeat = 1 end
     savePatternSysexProperties()
     itemSelectionChanged(false)
+end
+
+
+function incrementSwing()
+    pattern.swing = pattern.swing + 1;
+    if pattern.swing > 99 then pattern.swing = 99 end
+    emitEdited()
+end
+
+function decrementSwing()
+    pattern.swing = pattern.swing - 1;
+    if pattern.swing < 0 then pattern.swing = 0 end
+    emitEdited()
 end
 
 
@@ -427,7 +455,9 @@ function processKey(key)
         if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
         if key == keycodes.f2 then decrementGrid() end
         if key == keycodes.f3 then incrementGrid() end
-        if key == keycodes.f4 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f4 then decrementSwing() end
+        if key == keycodes.f5 then incrementSwing() end
+        if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
         if key == keycodes.space then reaperTogglePlay() end
 
         notePressed(key)
@@ -458,32 +488,6 @@ function ppq2line(ppq)
 end
 
 
-function deletePatternData(take)
-    retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(take)
-    for i = 0, textsyxevtcnt - 1, 1 do
-        retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(take, i)
-        if (retval) then
-            idx = string.find(data, "PATTERN")
-            if idx == 1 then
-                reaper.MIDI_DeleteTextSysexEvt(take, i)
-            end
-        end
-    end
-end
-
-function storePatternData(take)
-    -- pattern data is stored as midi text event. When using pattern editor, notes are not "parsed" from midi clip, but whole pattern context data are stored into special sysex text event inside midi clip.
-    -- everytime pattern is edited, those data are read and all midi notes are regenerated from scratch
-
-    -- delete old data
-    deletePatternData(take)
-
-    -- insert new data
-    --    tracks_dump = serpent.dump(tracks)
-    --    tracks_dump = "PATTERN_DATA:" .. tracks_dump
-    --    reaper.MIDI_InsertTextSysexEvt(take, false, false, 1, 1, tracks_dump)
-end
-
 function getTakeLengthPPQ(take)
     item = reaper.GetMediaItemTake_Item(take)
     len_sec = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
@@ -504,6 +508,7 @@ end
 
 -- loads data from midi clip
 function loadMidiClip(parseSysex)
+
     -- read pattern properties from sysex
     if parseSysex then
         loadPatternSysexProperties()
@@ -536,7 +541,6 @@ end
 -- save pattern data to midi clip
 function saveMidiClip()
     reaper.Undo_BeginBlock2(0)
-    storePatternData(pattern.take)
 
     -- delete all notes in midi clip
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
@@ -550,11 +554,21 @@ function saveMidiClip()
         for lineNo, record in pairs(track) do
             if record ~= nil then
                 if record.pitch ~= nil and record.pitch ~= NOTE_OFF then
+                    noteStart = lineNo
                     noteLength = getNoteLengthLines(track, lineNo)
-                    -- dbg("note length " .. noteLength)
+                    --dbg("lama " .. lineNo .. " koza " .. noteLength)
+                    if pattern.swing > 0 then
+                        if lineNo % 2 == 0 then
+                            noteLength = noteLength + pattern.swing / 100
+                        else
+                            noteStart = noteStart + pattern.swing / 100
+                            noteLength = noteLength - pattern.swing / 100
+                        end
+                    end
+                    --dbg("lama1 " .. noteStart .. " koza1 " .. noteLength)
                     reaper.MIDI_InsertNote(pattern.take, false, false,
-                        line2ppq(lineNo),
-                        line2ppq(lineNo) + line2ppq(noteLength) - 1,
+                        line2ppq(noteStart),
+                        line2ppq(noteStart) + line2ppq(noteLength) - 1,
                         trackNo,
                         record.pitch,
                         record.velocity,
@@ -571,22 +585,39 @@ end
 
 function savePatternSysexProperties()
     reaper.Undo_BeginBlock2(0)
-    for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, i) end
-    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 1, 1, pattern.linesPerBeat)
-    -- todo more properties
+    for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.linesPerBeat)
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.swing)
     reaper.Undo_EndBlock2(0, "Pattern properties", 0)
 end
 
 function loadPatternSysexProperties()
-    local prop = getSysexProperty(0)
-    if prop then      pattern.linesPerBeat = tonumber(prop) or 8 end
-    if pattern.linesPerBeat == nil then pattern.linesPerBeat = 8 end
+    local prop
+    prop = getSysexProperty(0)
+    if prop then pattern.linesPerBeat = tonumber(prop) or 8 end
+    if pattern.linesPerBeat == nil or pattern.linesPerBeat < 1 then pattern.linesPerBeat = 8 end
+
+    prop = getSysexProperty(1)
+    if prop then pattern.swing = tonumber(prop) or 0 end
+
     -- todo more properties
+end
+
+
+function decrementLinesPerBeatPossible()
+    -- todo compare with pattern data
+    -- find notes (todo or cc) on odd lines
+    for i = 1, pattern.steps - 1, 2 do
+        for trackNo = 0, gui.numOfTracks, 1 do
+            if getRecord(trackNo, i) ~= nil then return false end
+        end
+    end
+    return true
 end
 
 function getSysexProperty(idx)
     retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, idx)
-    return data:sub(0,data:len()-1)
+    return data:sub(0, data:len() - 1)
 end
 
 function setColorByLine(lineno)
@@ -619,7 +650,7 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: %02d  Edit mode: %s  Loud mode: %s", pattern.linesPerBeat, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode))
+    gfx.printf("Grid: %02d  Edit mode: %s  Loud mode: %s  Swing: %s", pattern.linesPerBeat, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode), pattern.swing)
 end
 
 
