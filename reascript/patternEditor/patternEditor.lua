@@ -52,7 +52,9 @@ end
 -- handles scrolling and todo grid
 gui.toPatternIndex = function(line)
     -- todo grid
-    return line + cursor.patternOffsetLines
+    --dbg("a "..gui.gridSize)
+    --dbg("b" .. (line + cursor.patternOffsetLines) * 128 / gui.gridSize)
+    return (line + cursor.patternOffsetLines) * 128 / gui.gridSize
 end
 
 
@@ -174,10 +176,18 @@ pattern.init = function(steps)
 end
 
 pattern.getRecord = function(position, track)
+    if position > pattern.steps - 1 then
+        err("Invalid position")
+        return nil
+    end
     return pattern.data[position][track]
 end
 
 pattern.setRecord = function(position, track, rec)
+    if position > pattern.steps - 1 then
+        err("Invalid position")
+        return nil
+    end
     pattern.data[position][track] = rec
 end
 
@@ -227,6 +237,7 @@ function init()
         --dbg("notelen " .. noteLenOutOptional)
         local gridNoteLen = reaper.MIDIEditor_GetSetting_int(pattern.editor, "default_note_len")
         dbg(gridNoteLen)
+        loadMidiClip()
         -- todo calculate grid size from note length
         update()
     end
@@ -422,16 +433,34 @@ function isKey(key, ch)
     return string.byte(ch) == key
 end
 
+-- grid size to command id of sws "Grid: set to x" commands
+gridSizeToSWSAction = {}
+gridSizeToSWSAction[128] = 41019
+gridSizeToSWSAction[64] = 41020
+gridSizeToSWSAction[32] = 40190
+gridSizeToSWSAction[16] = 40192
+gridSizeToSWSAction[8] = 40197
+gridSizeToSWSAction[4] = 40201
+gridSizeToSWSAction[2] = 40203
+gridSizeToSWSAction[1] = 40204
+
 function decrementGrid()
     gui.gridSize = gui.gridSize * 2
     if gui.gridSize > 128 then gui.gridSize = 128 end
-    -- todo update grid (use SWS commands to set it)
+    saveMidiClip()
 end
 
 function incrementGrid()
     gui.gridSize = gui.gridSize / 2
     if gui.gridSize < 1 then gui.gridSize = 1 end
-    -- todo update grid (use SWS commands to set it)
+    savePatternSysexProperties()
+    saveMidiClip()
+end
+
+function updateEditorGrid()
+    local cmdId = gridSizeToSWSAction[gui.gridSize]
+    dbg(cmdId)
+    if cmdId then reaper.MIDIEditor_OnCommand(pattern.editor, cmdId) end
 end
 
 function incrementStepSize()
@@ -548,6 +577,9 @@ end
 -- loads data from midi clip
 function loadMidiClip()
 
+    loadPatternSysexProperties()
+    dbg(gui.gridSize)
+
     -- todo unquantize original midi clip by reaper action before read
     reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
     reaper.MIDIEditor_OnCommand(pattern.editor, 40402) -- unquantize
@@ -592,6 +624,8 @@ function saveMidiClip()
         reaper.MIDI_DeleteNote(pattern.take, 0)
     end
 
+    updateEditorGrid()
+
     -- write new events to midi clip
     for patternPosition = 0, pattern.steps - 1, 1 do
         for trackNo = 0, gui.numOfTracks, 1 do
@@ -614,6 +648,7 @@ function saveMidiClip()
 
     reaper.Undo_EndBlock2(0, "Pattern editor", 0)
 
+    savePatternSysexProperties()
     -- todo is swing then call quantize on midi editor
     reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
     reaper.MIDIEditor_OnCommand(pattern.editor, 40729) -- quantize to grid
@@ -666,6 +701,31 @@ function drawMenus()
     gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode))
 end
 
+
+function savePatternSysexProperties()
+    reaper.Undo_BeginBlock2(0)
+    for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, gui.gridSize)
+    --reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.swing)
+    reaper.Undo_EndBlock2(0, "Pattern properties", 0)
+end
+
+function loadPatternSysexProperties()
+    local prop
+    prop = getSysexProperty(0)
+    if prop then gui.gridSize = tonumber(prop) end
+    if gui.gridSize == nil or gui.gridSize < 1 then gui.gridSize = 128 end
+
+    --prop = getSysexProperty(1)
+    --if prop then pattern.swing = tonumber(prop) or 0 end
+
+    -- todo more properties
+end
+
+function getSysexProperty(idx)
+    retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, idx)
+    return data:sub(0, data:len() - 1)
+end
 
 function update()
     gui.update(pattern.steps)
