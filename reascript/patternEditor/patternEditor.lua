@@ -2,10 +2,17 @@
 Keys:
 f2 - decrease grid size
 f3 - increase grid size
-f4 - turn on loud mode
+f4 - decrease step size
+f5 - increase step size
+f6 - turn on loud mode
 space - toggle play
+esc - toggle edit mode
 
 TODO:
+    - spravit edit mode ako to ma renoise (ESC)
+    - pattern sa bude ukladat priebezne tak ako doteraz, ale po ukonceni ESC sa ulozi finalne
+    - skusit ci to nepojde spravit tak ze undo point by sa ulozil len pri vypnuti edit modu a nie vzdy po zapise patternu
+
     - loud mode bude mat 3 rezimy:
         - off
         - single track
@@ -28,10 +35,10 @@ gui.lineColWidth = 30
 gui.trackSize = 110
 gui.patternStartLine = 3
 gui.patternVisibleLines = 0
-gui.selectionMode = false
 gui.loudMode = false
 gui.stepSize = 1
 gui.gridSize = 128
+gui.editMode = false
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
@@ -384,6 +391,20 @@ function emitEdited()
     lastEditTime = os.clock()
 end
 
+function toggleEditMode()
+    if gui.editMode then
+        -- undo nefunguje ako som cakal. Pokial sa midi item updatlo automaticky este pred zavolanim tohoto kodu,
+        -- nevytvori sa ziaden undo point (asi lebo sa nezmenil item). Ked sa toto zavola este pred zapisom patternu, tak sa vytvori
+        --reaper.Undo_BeginBlock()
+        saveMidiClip()
+        --reaper.Undo_OnStateChangeEx("MIDI clip updated by pattern editor", -1, -1)
+        --reaper.Undo_OnStateChange_Item(0, "TODO1", pattern.item)
+        --reaper.Undo_EndBlock("TODO2", 4)
+
+    end
+    gui.editMode = not gui.editMode
+end
+
 
 function notePressed(key)
     pitch = nil
@@ -419,24 +440,24 @@ function notePressed(key)
     if isKey(key, '`') then pitch = NOTE_OFF end
 
     if pitch ~= nil then
-        rec = insertNoteAtCursor()
+        local rec = {}
+        rec.pitch = toPitch(pitch)
+        if rec.pitch ~= NOTE_OFF then
+            rec.velocity = 50
+        end
+        if gui.editMode then
+            insertNoteAtCursor(rec)
+            cursor.down()
+        end
         generateTone(rec.pitch)
-        cursor.down()
-        emitEdited()
     end
 end
 
 
-function insertNoteAtCursor()
+function insertNoteAtCursor(rec)
     patternIndex = cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines)
-    rec = pattern.getRecord(patternIndex, cursor.track)
-    if rec == nil then rec = {} end
-    rec.pitch = toPitch(pitch)
-    if rec.pitch ~= NOTE_OFF then
-        rec.velocity = 50
-    end
     pattern.setRecord(patternIndex, cursor.track, rec)
-    return rec
+    emitEdited()
 end
 
 function deleteUnderCursor()
@@ -525,13 +546,13 @@ function processKey(key)
         -- todo checks inside patter class
         if key == keycodes.pageDown then cursor.pageDown() end
         if key == keycodes.pageUp then cursor.pageUp() end
-        if key == keycodes.escKey then global.selectionMode = not global.selectionMode end
         if key == keycodes.f2 then decrementGrid() end
         if key == keycodes.f3 then incrementGrid() end
         if key == keycodes.f4 then decrementStepSize() end
         if key == keycodes.f5 then incrementStepSize() end
         if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
         if key == keycodes.space then reaperTogglePlay() end
+        if key == keycodes.escKey then toggleEditMode() end
 
         notePressed(key)
         return true
@@ -648,7 +669,7 @@ end
 
 -- save pattern data to midi clip
 function saveMidiClip()
-    reaper.Undo_BeginBlock2(0)
+
     -- delete all notes in midi clip
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
     for i = 0, notecnt, 1 do
@@ -677,12 +698,11 @@ function saveMidiClip()
         end
     end
 
-    reaper.Undo_EndBlock2(0, "Pattern editor", 0)
-
     savePatternSysexProperties()
     -- todo is swing then call quantize on midi editor
     reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
     reaper.MIDIEditor_OnCommand(pattern.editor, 40729) -- quantize to grid
+    reaper.MIDIEditor_OnCommand(pattern.editor, 40214) -- unselect all
 end
 
 function setColorByLine(lineno)
@@ -729,16 +749,14 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.selectionMode), gui.toOnOffString(gui.loudMode))
+    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode))
 end
 
 
 function savePatternSysexProperties()
-    reaper.Undo_BeginBlock2(0)
     for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
     reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, gui.gridSize)
     --reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.swing)
-    reaper.Undo_EndBlock2(0, "Pattern properties", 0)
 end
 
 function loadPatternSysexProperties()
