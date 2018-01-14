@@ -5,12 +5,11 @@ f3 - increase grid size
 f4 - turn on loud mode
 space - toggle play
 
-TODO:   - storage pre track bude vzdy 1 step = 1/128
-        - grid bude mat vplyv len na zobrazovanie
-        - pokial sa v patterne nachadza zaznam mimo grid, zobrazi sa v danom riadku upozornenie
-
-
-TODO:   grid size zobrazovat ako 1/32 atd...
+TODO:
+    - loud mode bude mat 3 rezimy:
+        - off
+        - single track
+        - multiple track (prehra vsetky noty zo vsetkych trackov)
 
 ]]
 
@@ -48,16 +47,11 @@ gui.patternLine2y = function(patternLine)
     return line2y(patternLine + gui.patternStartLine)
 end
 
--- convert gui pattern line to pattern index
--- handles scrolling and todo grid
-gui.toPatternIndex = function(line)
-    -- todo grid
-    --dbg("a "..gui.gridSize)
-    --dbg("b" .. (line + cursor.patternOffsetLines) * 128 / gui.gridSize)
-    return (line + cursor.patternOffsetLines) * 128 / gui.gridSize
+gui.getNumOfVisiblePatternLines = function()
+    local numOfLines = math.floor(pattern.steps * (gui.gridSize / 128))
+    if numOfLines > gui.patternVisibleLines then numOfLines = gui.patternVisibleLines end
+    return numOfLines
 end
-
-
 
 cursor = {}
 cursor.track = 0
@@ -66,7 +60,10 @@ cursor.line = 0
 cursor.down = function()
     for i = 1, gui.stepSize, 1 do
         cursor.line = cursor.line + 1
-        if cursor.line > gui.patternVisibleLines - 1 then cursor.line = gui.patternVisibleLines - 1; pattern.scrollDown(); end
+        if cursor.line > gui.getNumOfVisiblePatternLines() - 1 then
+            cursor.line = gui.getNumOfVisiblePatternLines() - 1;
+            pattern.scrollDown();
+        end
     end
     -- todo
 end
@@ -74,7 +71,10 @@ cursor.up = function()
     -- todo
     for i = 1, gui.stepSize, 1 do
         cursor.line = cursor.line - 1
-        if cursor.line < 0 then cursor.line = 0; pattern.scrollUp(); end
+        if cursor.line < 0 then
+            cursor.line = 0;
+            pattern.scrollUp();
+        end
     end
 end
 cursor.right = function()
@@ -100,6 +100,16 @@ cursor.pageUp = function()
         cursor.patternOffsetLines = 0
         cursor.line = 0
     end
+end
+
+-- convert gui pattern line to pattern index
+-- handles scrolling and todo grid
+cursor.toPatternIndex = function(line)
+    return math.floor((line) * 128 / gui.gridSize)
+end
+
+cursor.toGuiLine = function(patternIndex)
+    return math.floor(patternIndex / 128 * gui.gridSize)
 end
 
 
@@ -141,8 +151,8 @@ function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
 end
 
-function trace()
-    dbg(debug.traceback())
+function trace(m)
+    dbg(m .. debug.traceback())
 end
 
 function err(m)
@@ -162,7 +172,10 @@ pattern.scrollUp = function()
 end
 pattern.scrollDown = function()
     cursor.patternOffsetLines = cursor.patternOffsetLines + 1
-    if cursor.patternOffsetLines > pattern.steps - gui.patternVisibleLines then cursor.patternOffsetLines = pattern.steps - gui.patternVisibleLines; end
+    local patternGuiLines = cursor.toGuiLine(pattern.steps)
+    if cursor.patternOffsetLines > patternGuiLines - gui.getNumOfVisiblePatternLines() then
+        cursor.patternOffsetLines = patternGuiLines - gui.getNumOfVisiblePatternLines();
+    end
 end
 
 pattern.init = function(steps)
@@ -176,10 +189,6 @@ pattern.init = function(steps)
 end
 
 pattern.getRecord = function(position, track)
-    if position > pattern.steps - 1 then
-        err("Invalid position")
-        return nil
-    end
     return pattern.data[position][track]
 end
 
@@ -210,7 +219,7 @@ end
 
 
 function init()
-    gfx.init("", 800, 800, 0)
+    gfx.init("Pattern editor", 800, 800, 0)
     gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
     -- gfx.dock(1) -- todo store/restore
@@ -231,12 +240,7 @@ function init()
         pattern.item = reaper.GetMediaItemTake_Item(pattern.take)
         itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
         retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-        pattern.init(beatsToPatternSteps(fullbeatsOutOptional) - 1)
-        --retval, swingOutOptional, noteLenOutOptional = reaper.MIDI_GetGrid(pattern.take)
-        --dbg("swing " .. swingOutOptional)
-        --dbg("notelen " .. noteLenOutOptional)
-        local gridNoteLen = reaper.MIDIEditor_GetSetting_int(pattern.editor, "default_note_len")
-        dbg(gridNoteLen)
+        pattern.init(beatsToPatternSteps(fullbeatsOutOptional))
         loadMidiClip()
         -- todo calculate grid size from note length
         update()
@@ -245,7 +249,7 @@ end
 
 function beatsToPatternSteps(beats)
     -- 1 beat = 32 1/128 notes
-    return math.floor(beats * 32) + 1
+    return math.floor(beats * 32)
 end
 
 function patternStepsToBeats(steps)
@@ -399,6 +403,23 @@ function notePressed(key)
     if isKey(key, 'n') then pitch = 9 end
     if isKey(key, 'j') then pitch = 10 end
     if isKey(key, 'm') then pitch = 11 end
+    if isKey(key, 'q') then pitch = 12 end
+    if isKey(key, '2') then pitch = 13 end
+    if isKey(key, 'w') then pitch = 14 end
+    if isKey(key, '3') then pitch = 15 end
+    if isKey(key, 'e') then pitch = 16 end
+    if isKey(key, 'r') then pitch = 17 end
+    if isKey(key, '5') then pitch = 18 end
+    if isKey(key, 't') then pitch = 19 end
+    if isKey(key, '6') then pitch = 20 end
+    if isKey(key, 'y') then pitch = 21 end
+    if isKey(key, '7') then pitch = 22 end
+    if isKey(key, 'u') then pitch = 23 end
+    if isKey(key, 'i') then pitch = 24 end
+    if isKey(key, '9') then pitch = 25 end
+    if isKey(key, 'o') then pitch = 26 end
+    if isKey(key, '0') then pitch = 27 end
+
     if isKey(key, '`') then pitch = NOTE_OFF end
 
     if pitch ~= nil then
@@ -411,7 +432,7 @@ end
 
 
 function insertNoteAtCursor()
-    patternIndex = gui.toPatternIndex(cursor.line)
+    patternIndex = cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines)
     rec = pattern.getRecord(patternIndex, cursor.track)
     if rec == nil then rec = {} end
     rec.pitch = toPitch(pitch)
@@ -424,7 +445,7 @@ end
 
 function deleteUnderCursor()
     -- todo do not delete whole line, but only what is under cursor
-    deleteRecord(gui.toPatternIndex(cursor.line), cursor.track)
+    deleteRecord(cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines), cursor.track)
     processKey(keycodes.downArrow)
 end
 
@@ -447,19 +468,21 @@ gridSizeToSWSAction[1] = 40204
 function decrementGrid()
     gui.gridSize = gui.gridSize * 2
     if gui.gridSize > 128 then gui.gridSize = 128 end
+    cursor.line = 0
     saveMidiClip()
 end
 
 function incrementGrid()
+    if not isPossibleToIncrementGrid() then return end
     gui.gridSize = gui.gridSize / 2
     if gui.gridSize < 1 then gui.gridSize = 1 end
+    cursor.line = 0
     savePatternSysexProperties()
     saveMidiClip()
 end
 
 function updateEditorGrid()
     local cmdId = gridSizeToSWSAction[gui.gridSize]
-    dbg(cmdId)
     if cmdId then reaper.MIDIEditor_OnCommand(pattern.editor, cmdId) end
 end
 
@@ -475,7 +498,8 @@ end
 
 function playSelectedLine()
     if gui.loudMode then
-        rec = getOrCreateRecord(cursor.track, recordIndex(cursor.line))
+        local patternIndex = cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines)
+        local rec = pattern.getRecord(patternIndex, cursor.track)
         if rec ~= nil and rec.pitch ~= nil then
             generateTone(rec.pitch)
         end
@@ -520,10 +544,10 @@ end
 
 function reaperTogglePlay()
     -- todo seek cursor
-    local cursorLinePosition = recordIndex(cursor.line)
-    local beats = linesToBeats(cursorLinePosition)
+    local patternIndex = cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines)
+    local beats = patternStepsToBeats(patternIndex)
     local patternItemPositionSec = reaper.TimeMap2_beatsToTime(0, beats, 0)
-    local itemPositionSec = reaper.GetMediaItemInfo_Value(global.selectedItem, "D_POSITION")
+    local itemPositionSec = reaper.GetMediaItemInfo_Value(pattern.item, "D_POSITION")
     local globalPositionSec = itemPositionSec + patternItemPositionSec
     reaper.Main_OnCommand(40044, 0)
     reaper.SetEditCurPos(globalPositionSec, true, true)
@@ -574,12 +598,22 @@ function getPatternNoteLength(patternPosition, trackNo)
 end
 
 
+function isPossibleToIncrementGrid()
+    -- find odd records then false
+    for line = 1, cursor.toGuiLine(pattern.steps) - 1, 2 do
+        local patternIndex = cursor.toPatternIndex(line)
+        for track = 0, gui.numOfTracks, 1 do
+            local rec = pattern.getRecord(patternIndex, track)
+            if rec then return false end
+        end
+    end
+    return true
+end
+
 -- loads data from midi clip
 function loadMidiClip()
 
     loadPatternSysexProperties()
-    dbg(gui.gridSize)
-
     -- todo unquantize original midi clip by reaper action before read
     reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
     reaper.MIDIEditor_OnCommand(pattern.editor, 40402) -- unquantize
@@ -593,12 +627,13 @@ function loadMidiClip()
                 posStart = ppq2patternPosition(startppqpos)
                 posEnd = ppq2patternPosition(endppqpos)
 
-                -- place noteoff into pattern
-                if posStart < pattern.steps and posEnd < pattern.steps then
-                    rec = {}
-                    rec.pitch = NOTE_OFF
-                    pattern.setRecord(posEnd, trackNo, rec)
-
+                if posStart < pattern.steps and posEnd <= pattern.steps then
+                    -- place note end into pattern (do not place last note end behind pattern - pattern boundary will end it automatically)
+                    if (posEnd < pattern.steps) then
+                        rec = {}
+                        rec.pitch = NOTE_OFF
+                        pattern.setRecord(posEnd, trackNo, rec)
+                    end
                     -- place note into pattern
                     rec = {}
                     rec.pitch = pitch
@@ -617,7 +652,6 @@ end
 -- save pattern data to midi clip
 function saveMidiClip()
     reaper.Undo_BeginBlock2(0)
-
     -- delete all notes in midi clip
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
     for i = 0, notecnt, 1 do
@@ -672,15 +706,15 @@ end
 function drawPatternLine(line)
     drawPatternLineNumber(line, true)
     for trackNo = 0, gui.numOfTracks, 1 do
-        trackRec = pattern.getRecord(gui.toPatternIndex(line), trackNo)
+        trackRec = pattern.getRecord(cursor.toPatternIndex(line + cursor.patternOffsetLines), trackNo)
         drawTrackEntry(trackRec, line, trackNo)
     end
 end
 
+
 function drawAllTracks()
 
-    local numOfLines = pattern.steps * (gui.gridSize / 128)
-    if numOfLines > gui.patternVisibleLines then numOfLines = gui.patternVisibleLines end
+    local numOfLines = gui.getNumOfVisiblePatternLines()
     if numOfLines <= 1 then
         numOfLines = 2 -- always draw at least zero line
     end
