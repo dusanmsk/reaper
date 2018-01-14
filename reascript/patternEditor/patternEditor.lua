@@ -88,17 +88,13 @@ cursor.left = function()
     if cursor.track < 0 then cursor.track = gui.numOfTracks - 1; cursor.column = gui.trackColumns - 1; end
 end
 cursor.pageDown = function()
-    cursor.patternOffsetLines = cursor.patternOffsetLines + gui.patternVisibleLines
-    if cursor.patternOffsetLines > pattern.steps - gui.patternVisibleLines then
-        cursor.patternOffsetLines = pattern.steps - gui.patternVisibleLines
-        cursor.line = gui.patternVisibleLines - 1
+    for i = 1, gui.getNumOfVisiblePatternLines(), 1 do
+        cursor.down()
     end
 end
 cursor.pageUp = function()
-    cursor.patternOffsetLines = cursor.patternOffsetLines - gui.patternVisibleLines
-    if (cursor.patternOffsetLines < 0) then
-        cursor.patternOffsetLines = 0
-        cursor.line = 0
+    for i = 1, gui.getNumOfVisiblePatternLines(), 1 do
+        cursor.up()
     end
 end
 
@@ -476,6 +472,7 @@ function incrementGrid()
     if not isPossibleToIncrementGrid() then return end
     gui.gridSize = gui.gridSize / 2
     if gui.gridSize < 1 then gui.gridSize = 1 end
+    if gui.getNumOfVisiblePatternLines() < 4 then gui.gridSize = gui.gridSize * 2; end
     cursor.line = 0
     savePatternSysexProperties()
     saveMidiClip()
