@@ -10,6 +10,10 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
+    - zvazit ci je sposob nastavovania dlzky not sposobom "ton hra az po znak ===" spravny a ci by to nemohlo byt skor naopak,
+      tzn. jeden riadok povedzme "A-5" by bola nota dlha gridsize a pokial by mala hrat dlhsie tak pouzit nejaku specialnu klavesu
+      na jej predlzenie (napr. \). A zobrazit to ako "-|-" napr. alebo " | "
+
     - loud mode bude mat 3 rezimy:
         - off
         - single track
