@@ -9,6 +9,9 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
+    - autorefresh z item->pattern vola stale select all+unquantize+unselect all co je otravne ked clovek edituje item rucne v midi editore.
+      vymysliet ako sa z toho dostat, asi jedine sa vysrat na autorefresh a refreshovat len pocas editovania
+
     - loud mode bude mat 3 rezimy:
         - off
         - single track
@@ -804,17 +807,17 @@ function loop()
     -- do not save pattern to midi clip immediately, but update after no edit for some time
     local now = math.floor(os.clock())
     if gui.editMode == true and lastPatternUpdateTime ~= lastPatternEditTime and now - lastPatternEditTime > MIDI_CLIP_SAVE_UPDATE_TIME then
-        dbg("save")
         saveMidiClip()
         lastPatternUpdateTime = lastPatternEditTime
     end
 
     -- if not in editing mode, update pattern from its original midi clip periodically
-    if not gui.editMode and now - lastPatternLoadTime > MIDI_CLIP_LOAD_UPDATE_TIME then
-        dbg("load")
-        loadMidiClip()
-        lastPatternLoadTime = now
-    end
+-- temp disabled due to @see todo
+--    if not gui.editMode and now - lastPatternLoadTime > MIDI_CLIP_LOAD_UPDATE_TIME then
+--        dbg("load")
+--        loadMidiClip()
+--        lastPatternLoadTime = now
+--    end
 
     muteTones()
     update()
