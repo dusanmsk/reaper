@@ -147,7 +147,7 @@ keycodes.f8 = 26168
 keycodes.space = 32
 
 global = {}
-global.octave = 4
+gui.octave = 4
 
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
@@ -349,7 +349,7 @@ end
 
 
 function getCurrentOctave()
-    return global.octave
+    return gui.octave
 end
 
 function toPitch(pitch)
@@ -380,9 +380,9 @@ function muteTones(imediately)
 end
 
 function changeOctave(how)
-    global.octave = global.octave + how
-    if global.octave < 0 then global.octave = 0 end
-    if global.octave > 6 then global.octave = 6 end
+    gui.octave = gui.octave + how
+    if gui.octave < 0 then gui.octave = 0 end
+    if gui.octave > 6 then gui.octave = 6 end
 end
 
 lastPatternEditTime = 0
@@ -456,7 +456,7 @@ function notePressed(key)
             insertNoteAtCursor(rec)
             cursor.down()
         end
-        generateTone(pitch)
+        generateTone(toPitch(pitch))
     end
 end
 
@@ -473,6 +473,7 @@ function insertNoteAtCursor(rec)
 end
 
 function deleteUnderCursor()
+    if not gui.editMode == true then return end
     -- todo do not delete whole line, but only what is under cursor
     deleteRecord(cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines), cursor.track)
     processKey(keycodes.downArrow)
@@ -762,7 +763,7 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode))
+    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1)
 end
 
 
