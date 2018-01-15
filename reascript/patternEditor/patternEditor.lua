@@ -9,8 +9,6 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - if editing existing note, do not modify its velocity
-
     - loud mode bude mat 3 rezimy:
         - off
         - single track
@@ -442,17 +440,25 @@ function notePressed(key)
     if isKey(key, '`') then pitch = NOTE_OFF end
 
     if pitch ~= nil then
-        local rec = {}
-        rec.pitch = toPitch(pitch)
-        if rec.pitch ~= NOTE_OFF then
-            rec.velocity = 50
-        end
         if gui.editMode then
+            local rec = getNoteAtCursor()
+            if rec == nil then
+                rec = {}
+                if rec.pitch ~= NOTE_OFF then
+                    rec.velocity = 32 -- TODO default velocity from gui
+                end
+            end
+            rec.pitch = toPitch(pitch)
             insertNoteAtCursor(rec)
             cursor.down()
         end
-        generateTone(rec.pitch)
+        generateTone(pitch)
     end
+end
+
+function getNoteAtCursor()
+    patternIndex = cursor.toPatternIndex(cursor.line + cursor.patternOffsetLines)
+    return pattern.getRecord(patternIndex, cursor.track)
 end
 
 
