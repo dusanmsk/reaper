@@ -10,8 +10,6 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - refresh f5
-
     - loud mode bude mat 3 rezimy:
         - off
         - single track
@@ -36,7 +34,7 @@ gui.patternStartLine = 3
 gui.patternVisibleLines = 0
 gui.loudMode = false
 gui.stepSize = 1
-gui.gridSize = 128
+gui.gridSize = 16
 gui.editMode = false
 
 gui.update = function(patternLength)
@@ -778,7 +776,7 @@ function loadPatternSysexProperties()
     local prop
     prop = getSysexProperty(0)
     if prop then gui.gridSize = tonumber(prop) end
-    if gui.gridSize == nil or gui.gridSize < 1 then gui.gridSize = 128 end
+    if gui.gridSize == nil or gui.gridSize < 1 then gui.gridSize = 16 end
 
     --prop = getSysexProperty(1)
     --if prop then pattern.swing = tonumber(prop) or 0 end
