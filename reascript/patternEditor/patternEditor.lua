@@ -6,6 +6,7 @@ f4 - turn on loud mode
 f5 - refresh pattern (from reaper item, will be refreshed automatically when enabling edit mode)
 f6 - decrease step size
 f7 - increase step size
+f8 - toggle note length mode
 space - toggle play
 esc - toggle edit mode
 
@@ -13,6 +14,7 @@ TODO:
     - zvazit ci je sposob nastavovania dlzky not sposobom "ton hra az po znak ===" spravny a ci by to nemohlo byt skor naopak,
       tzn. jeden riadok povedzme "A-5" by bola nota dlha gridsize a pokial by mala hrat dlhsie tak pouzit nejaku specialnu klavesu
       na jej predlzenie (napr. \). A zobrazit to ako "-|-" napr. alebo " | "
+      Alebo lepsie - globalny settings ktory prepne dlzku not na pattern/grid - nezabudnut ulozit ako sysex
 
     - loud mode bude mat 3 rezimy:
         - off
@@ -40,6 +42,8 @@ gui.loudMode = false
 gui.stepSize = 1
 gui.gridSize = 16
 gui.editMode = false
+gui.defaultVelocity = 32
+gui.noteLengthMode = "grid"     -- allowed values "grid" (note length will be always grid length, you do not need to use noteoff - dedicated especially for drum patterns) and "full" (you need to use noteoff to set note length)
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
@@ -449,14 +453,10 @@ function notePressed(key)
 
     if pitch ~= nil then
         if gui.editMode then
-            local rec = getNoteAtCursor()
-            if rec == nil then
-                rec = {}
-                if rec.pitch ~= NOTE_OFF then
-                    rec.velocity = 32 -- TODO default velocity from gui
-                end
-            end
+            local rec = getNoteAtCursor() or {}
             rec.pitch = toPitch(pitch)
+            rec.velocity = rec.velocity or gui.defaultVelocity
+            if rec.pitch == NOTE_OFF then rec.velocity = nil end
             insertNoteAtCursor(rec)
             cursor.down()
         end
@@ -569,6 +569,7 @@ function processKey(key)
         if key == keycodes.f5 then refreshPattern() end
         if key == keycodes.f6 then decrementStepSize() end
         if key == keycodes.f7 then incrementStepSize() end
+        if key == keycodes.f8 then toggleNoteLengthMode() end
         if key == keycodes.space then reaperTogglePlay() end
         if key == keycodes.escKey then toggleEditMode() end
 
@@ -576,6 +577,12 @@ function processKey(key)
         return true
     end
     return false
+end
+
+
+function toggleNoteLengthMode()
+    if gui.noteLengthMode == "grid" then gui.noteLengthMode = "full"; return; end
+    gui.noteLengthMode = "grid"
 end
 
 function reaperTogglePlay()
@@ -623,6 +630,9 @@ end
 
 -- return note length (in pattern positions)
 function getPatternNoteLength(patternPosition, trackNo)
+
+    if gui.noteLengthMode == "grid" then return gui.gridSize end
+
     -- iterate over track, note length is until (new note or note_off or pattern end) occure
     for i = patternPosition + 1, pattern.steps - 1, 1 do
         local rec = pattern.getRecord(i, trackNo)
@@ -704,6 +714,7 @@ function saveMidiClip()
                 if record.pitch ~= nil and record.pitch ~= NOTE_OFF then
                     noteStart = patternPosition
                     noteLength = getPatternNoteLength(patternPosition, trackNo)
+                    dbg(noteLength)
                     reaper.MIDI_InsertNote(pattern.take, false, false,
                         patternPosition2ppq(noteStart),
                         patternPosition2ppq(noteStart) + patternPosition2ppq(noteLength),
@@ -767,7 +778,7 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1)
+    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s  NoteLen: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1, gui.noteLengthMode)
 end
 
 
