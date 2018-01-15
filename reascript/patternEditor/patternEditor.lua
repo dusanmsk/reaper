@@ -2,15 +2,15 @@
 Keys:
 f2 - decrease grid size
 f3 - increase grid size
-f4 - decrease step size
-f5 - increase step size
-f6 - turn on loud mode
+f4 - turn on loud mode
+f5 - refresh pattern (from reaper item, will be refreshed automatically when enabling edit mode)
+f6 - decrease step size
+f7 - increase step size
 space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - autorefresh z item->pattern vola stale select all+unquantize+unselect all co je otravne ked clovek edituje item rucne v midi editore.
-      vymysliet ako sa z toho dostat, asi jedine sa vysrat na autorefresh a refreshovat len pocas editovania
+    - refresh f5
 
     - loud mode bude mat 3 rezimy:
         - off
@@ -402,12 +402,15 @@ function toggleEditMode()
         --reaper.Undo_OnStateChange_Item(0, "TODO1", pattern.item)
         --reaper.Undo_EndBlock("TODO2", 4)
     else
-        loadMidiClip()
-        update()
+        refreshPattern()
     end
     gui.editMode = not gui.editMode
 end
 
+function refreshPattern()
+    loadMidiClip()
+    update()
+end
 
 function notePressed(key)
     pitch = nil
@@ -559,9 +562,10 @@ function processKey(key)
         if key == keycodes.pageUp then cursor.pageUp() end
         if key == keycodes.f2 then decrementGrid() end
         if key == keycodes.f3 then incrementGrid() end
-        if key == keycodes.f4 then decrementStepSize() end
-        if key == keycodes.f5 then incrementStepSize() end
-        if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f4 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f5 then refreshPattern() end
+        if key == keycodes.f6 then decrementStepSize() end
+        if key == keycodes.f7 then incrementStepSize() end
         if key == keycodes.space then reaperTogglePlay() end
         if key == keycodes.escKey then toggleEditMode() end
 
