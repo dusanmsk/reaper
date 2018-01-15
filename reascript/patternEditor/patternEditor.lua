@@ -9,9 +9,7 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - spravit edit mode ako to ma renoise (ESC)
-    - pattern sa bude ukladat priebezne tak ako doteraz, ale po ukonceni ESC sa ulozi finalne
-    - skusit ci to nepojde spravit tak ze undo point by sa ulozil len pri vypnuti edit modu a nie vzdy po zapise patternu
+    - if editing existing note, do not modify its velocity
 
     - loud mode bude mat 3 rezimy:
         - off
@@ -116,7 +114,9 @@ cursor.toGuiLine = function(patternIndex)
 end
 
 
-MIDI_CLIP_UPDATE_TIME = 0.5
+MIDI_CLIP_SAVE_UPDATE_TIME = 0.5
+MIDI_CLIP_LOAD_UPDATE_TIME = 2
+
 
 
 NOTE_OFF = -1
@@ -386,9 +386,9 @@ function changeOctave(how)
     if global.octave > 6 then global.octave = 6 end
 end
 
-lastEditTime = 0
+lastPatternEditTime = 0
 function emitEdited()
-    lastEditTime = os.clock()
+    lastPatternEditTime = os.clock()
 end
 
 function toggleEditMode()
@@ -400,7 +400,9 @@ function toggleEditMode()
         --reaper.Undo_OnStateChangeEx("MIDI clip updated by pattern editor", -1, -1)
         --reaper.Undo_OnStateChange_Item(0, "TODO1", pattern.item)
         --reaper.Undo_EndBlock("TODO2", 4)
-
+    else
+        loadMidiClip()
+        update()
     end
     gui.editMode = not gui.editMode
 end
@@ -785,16 +787,27 @@ function update()
 end
 
 
-lastUpdateTime = 0
+lastPatternUpdateTime = 0
+lastPatternLoadTime = 0
 function loop()
     keyWasPressed = processKeyboard()
     if keyWasPressed == true then
         update()
     end
-    -- do not update immediately, but update after no edit for some time
-    if lastUpdateTime ~= lastEditTime and os.clock() - lastEditTime > MIDI_CLIP_UPDATE_TIME then
+
+    -- do not save pattern to midi clip immediately, but update after no edit for some time
+    local now = math.floor(os.clock())
+    if gui.editMode == true and lastPatternUpdateTime ~= lastPatternEditTime and now - lastPatternEditTime > MIDI_CLIP_SAVE_UPDATE_TIME then
+        dbg("save")
         saveMidiClip()
-        lastUpdateTime = lastEditTime
+        lastPatternUpdateTime = lastPatternEditTime
+    end
+
+    -- if not in editing mode, update pattern from its original midi clip periodically
+    if not gui.editMode and now - lastPatternLoadTime > MIDI_CLIP_LOAD_UPDATE_TIME then
+        dbg("load")
+        loadMidiClip()
+        lastPatternLoadTime = now
     end
 
     muteTones()
