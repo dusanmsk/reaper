@@ -11,6 +11,8 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
+    - vobec nijak nie je poriesene ked loadujem midi clip ktory nepochadza z pattern editoru a su v nom paralelne noty.
+    bud to poriesit nejak elegantne, alebo sa na to vykaslat a neumoznit editovat klipy ktore nemaju pattern editor sysexy
     - NOTE to ci je stlaceny shift/ctrl mozno pojde vycitat z mouse_cap
 
     - loud mode bude mat 3 rezimy:
@@ -833,8 +835,9 @@ function savePatternSysexProperties()
 end
 
 function loadPatternSysexProperties()
+    gui.gridSize = 128
     local prop = getSysexProperty(0)
-    if prop then gui.gridSize = tonumber(prop) else gui.gridSize = 128 end
+    if prop then gui.gridSize = tonumber(prop) end
 
     prop = getSysexProperty(1)
     if prop then pattern.noteLengthMode = prop else pattern.noteLengthMode = "full" end
