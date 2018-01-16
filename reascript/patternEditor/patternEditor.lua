@@ -13,6 +13,11 @@ esc - toggle edit mode
 TODO:
     - vobec nijak nie je poriesene ked loadujem midi clip ktory nepochadza z pattern editoru a su v nom paralelne noty.
     bud to poriesit nejak elegantne, alebo sa na to vykaslat a neumoznit editovat klipy ktore nemaju pattern editor sysexy
+
+    Mozno by to slo spravit tak, ze pokial to nie je original "pattern" midi clip, pouzit nejaku special importovaciu funkciu,
+    ktora by proste plnila tracky tak, ze pokial v tracku v danom bloku (ktory zabere prave parsovana nota) nic nehra,
+    tak sa pouzije, inak sa pouzije dalsi track atd...
+
     - NOTE to ci je stlaceny shift/ctrl mozno pojde vycitat z mouse_cap
 
     - loud mode bude mat 3 rezimy:
