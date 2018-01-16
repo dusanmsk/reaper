@@ -11,7 +11,6 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - ulozit a nacitat poziciu, rozmer a dock do/z extstate
     - NOTE to ci je stlaceny shift/ctrl mozno pojde vycitat z mouse_cap
 
     - loud mode bude mat 3 rezimy:
@@ -35,13 +34,13 @@ gui.trackColumns = 4
 gui.numOfTracks = 8
 gui.displayLines = 32
 gui.lineColOffset = 5
-gui.lineColWidth = 30
+gui.lineColWidth = 33
 gui.trackSize = 110
 gui.patternStartLine = 3
 gui.patternVisibleLines = 0
 gui.loudMode = false
 gui.stepSize = 1
-gui.gridSize = 16
+gui.gridSize = 128
 gui.editMode = false
 gui.octave = 4
 gui.defaultVelocity = 32
@@ -592,7 +591,7 @@ function processKey(key)
         if key == keycodes.octaveDown then changeOctave(-1) end
         if key == keycodes.deleteKey then deleteUnderCursor() end
         if key == keycodes.homeKey then cursor.patternOffsetLines = 0 end
-        if key == keycodes.endKey then cursor.patternOffsetLines = pattern.steps - gui.patternVisibleLines end
+        if key == keycodes.endKey then cursor.patternOffsetLines = cursor.toGuiLine(pattern.steps) - gui.patternVisibleLines; cursor.line = gui.patternVisibleLines - 1 end
         -- todo checks inside patter class
         if key == keycodes.pageDown then cursor.pageDown() end
         if key == keycodes.pageUp then cursor.pageUp() end
@@ -696,6 +695,8 @@ function loadMidiClip(readSysexProperties)
 
     if pattern.editor == nil then return end
 
+    gui.gridSize = 128
+    pattern.noteLengthMode = "full"
     if readSysexProperties then loadPatternSysexProperties() end
 
     -- todo unquantize original midi clip by reaper action before read
@@ -784,15 +785,15 @@ function setColorByLine(lineno)
     end
 end
 
-function drawPatternLineNumber(lineno, hiddenRecords)
+function drawPatternLineNumber(lineno)
     setColorByLine(lineno + cursor.patternOffsetLines) -- todo
     gfx.x = gui.lineColOffset
     gfx.y = gui.patternLine2y(lineno)
-    gfx.printf("%02d%s", lineno + cursor.patternOffsetLines, hiddenRecords and '.' or '')
+    gfx.printf("%02d", lineno + cursor.patternOffsetLines)
 end
 
 function drawPatternLine(line)
-    drawPatternLineNumber(line, true)
+    drawPatternLineNumber(line)
     for trackNo = 0, gui.numOfTracks, 1 do
         trackRec = pattern.getRecord(cursor.toPatternIndex(line + cursor.patternOffsetLines), trackNo)
         drawTrackEntry(trackRec, line, trackNo)
@@ -833,7 +834,7 @@ end
 
 function loadPatternSysexProperties()
     local prop = getSysexProperty(0)
-    if prop then gui.gridSize = tonumber(prop) else gui.gridSize = 16 end
+    if prop then gui.gridSize = tonumber(prop) else gui.gridSize = 128 end
 
     prop = getSysexProperty(1)
     if prop then pattern.noteLengthMode = prop else pattern.noteLengthMode = "full" end
@@ -858,6 +859,13 @@ end
 lastPatternUpdateTime = 0
 lastPatternLoadTime = 0
 function loop()
+
+    local editor = reaper.MIDIEditor_GetActive()
+    local take = reaper.MIDIEditor_GetTake(editor)
+    if gui.selectedTake ~= take then
+        takeChanged(editor, take)
+    end
+
     keyWasPressed = processKeyboard()
 
     -- do not save pattern to midi clip immediately, but update after no edit for some time
@@ -865,12 +873,6 @@ function loop()
     if gui.editMode == true and lastPatternUpdateTime ~= lastPatternEditTime and now - lastPatternEditTime > MIDI_CLIP_SAVE_UPDATE_TIME then
         saveMidiClip()
         lastPatternUpdateTime = lastPatternEditTime
-    end
-
-    local editor = reaper.MIDIEditor_GetActive()
-    local take = reaper.MIDIEditor_GetTake(editor)
-    if gui.selectedTake ~= take then
-        takeChanged(editor, take)
     end
 
     muteTones()
