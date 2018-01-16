@@ -1,12 +1,12 @@
 --[[
 Keys:
-f2 - decrease grid size
-f3 - increase grid size
-f4 - turn on loud mode
+f1 - decrease step size
+f2 - increase step size
+f3 - decrease grid size
+f4 - increase grid size
 f5 - refresh pattern (from reaper item, will be refreshed automatically when enabling edit mode)
-f6 - decrease step size
-f7 - increase step size
-f8 - toggle note length mode
+f6 - turn on loud mode
+f7 - toggle note length mode
 space - toggle play
 esc - toggle edit mode
 
@@ -229,18 +229,42 @@ function linesToBeats(lines)
 end
 
 
+function storeWindowDimensions()
+    local d, x, y, w, h = gfx.dock(-1, 0, 0, 0, 0)
+    if  w > 0 and h > 0 then -- skip first run
+        reaper.SetExtState("pattern_editor", "window.x", tostring(x), false)
+        reaper.SetExtState("pattern_editor", "window.y", tostring(y), false)
+        reaper.SetExtState("pattern_editor", "window.w", tostring(w), false)
+        reaper.SetExtState("pattern_editor", "window.h", tostring(h), false)
+    end
+end
+
+function loadWindowDimensions()
+    local x = tonumber(reaper.GetExtState("pattern_editor", "window.x")) or 100
+    local y = tonumber(reaper.GetExtState("pattern_editor", "window.y")) or 100
+    local w = tonumber(reaper.GetExtState("pattern_editor", "window.w")) or 200
+    local h = tonumber(reaper.GetExtState("pattern_editor", "window.h")) or 200
+    return x, y, w, h
+end
+
+function initGui()
+    local x, y, w, h = loadWindowDimensions()
+    gfx.quit()
+    gfx.init("Pattern editor", w, h, 0, x, y)
+    gfx.setfont(1, "Monospace", gui.fontsize)
+    gfx.clear = 55
+end
+
+function exit()
+    storeWindowDimensions()
+end
+
 function takeChanged(editor, take)
 
     gui.selectedTake = take
 
-    local d,x,y,w,h = gfx.dock(-1,0,0,0,0)
-    gfx.quit()
-    -- reaper.Main_OnCommand(40153, 0) -- open midi editor
-
-    local d = 0 --TODO docked?
-    gfx.init("Pattern editor", w, h, d, x, y)
-    gfx.setfont(1, "Monospace", gui.fontsize)
-    gfx.clear = 55
+    storeWindowDimensions()
+    initGui()
 
     pattern.data = {}
     pattern.steps = 0
@@ -571,13 +595,13 @@ function processKey(key)
         -- todo checks inside patter class
         if key == keycodes.pageDown then cursor.pageDown() end
         if key == keycodes.pageUp then cursor.pageUp() end
-        if key == keycodes.f2 then decrementGrid() end
-        if key == keycodes.f3 then incrementGrid() end
-        if key == keycodes.f4 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f1 then decrementStepSize() end
+        if key == keycodes.f2 then incrementStepSize() end
+        if key == keycodes.f3 then decrementGrid() end
+        if key == keycodes.f4 then incrementGrid() end
         if key == keycodes.f5 then refreshPattern() end
-        if key == keycodes.f6 then decrementStepSize() end
-        if key == keycodes.f7 then incrementStepSize() end
-        if key == keycodes.f8 then toggleNoteLengthMode() end
+        if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f7 then toggleNoteLengthMode() end
         if key == keycodes.space then reaperTogglePlay() end
         if key == keycodes.escKey then toggleEditMode() end
 
@@ -600,7 +624,7 @@ function reaperTogglePlay()
     local patternItemPositionSec = reaper.TimeMap2_beatsToTime(0, beats, 0)
     local itemPositionSec = reaper.GetMediaItemInfo_Value(pattern.item, "D_POSITION")
     local globalPositionSec = itemPositionSec + patternItemPositionSec
-    reaper.Main_OnCommand(40044, 0)  -- transport play/stop
+    reaper.Main_OnCommand(40044, 0) -- transport play/stop
     reaper.SetEditCurPos(globalPositionSec, true, true)
 end
 
@@ -746,10 +770,9 @@ function saveMidiClip()
     savePatternSysexProperties()
     -- todo is swing then call quantize on midi editor
     -- todo open editor, do action, close editor
-    reaper.MIDIEditor_LastFocused_OnCommand( 40003, false) -- select all
-    reaper.MIDIEditor_LastFocused_OnCommand( 40729, false) -- quantize to grid
-    reaper.MIDIEditor_LastFocused_OnCommand( 40214, false) -- unselect all
-
+    reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
+    reaper.MIDIEditor_LastFocused_OnCommand(40729, false) -- quantize to grid
+    reaper.MIDIEditor_LastFocused_OnCommand(40214, false) -- unselect all
 end
 
 function setColorByLine(lineno)
@@ -853,6 +876,9 @@ function loop()
     update()
     reaper.defer(loop)
 end
+
+
+reaper.atexit(exit)
 
 --debugColumns()
 loop()
