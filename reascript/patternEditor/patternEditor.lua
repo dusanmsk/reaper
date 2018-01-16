@@ -11,8 +11,8 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
+    - ulozit a nacitat poziciu, rozmer a dock do/z extstate
     - NOTE to ci je stlaceny shift/ctrl mozno pojde vycitat z mouse_cap
-    - namiesto item selected kontrolovat zmenu obsahu midi editoru (zmenu itemu ci take)
 
     - loud mode bude mat 3 rezimy:
         - off
@@ -45,6 +45,7 @@ gui.gridSize = 16
 gui.editMode = false
 gui.octave = 4
 gui.defaultVelocity = 32
+gui.selectedTake = nil
 
 cursor = {}
 cursor.track = 0
@@ -228,18 +229,18 @@ function linesToBeats(lines)
 end
 
 
-function itemSelected()
+function takeChanged(editor, take)
 
-    local __,x,y,w,h = gfx.dock(-1,0,0,0,0)
+    gui.selectedTake = take
+
+    local d,x,y,w,h = gfx.dock(-1,0,0,0,0)
     gfx.quit()
-    reaper.Main_OnCommand(40153, 0) -- open midi editor
+    -- reaper.Main_OnCommand(40153, 0) -- open midi editor
 
-    gfx.init("my window", w, h, 0, x, y)
+    local d = 0 --TODO docked?
+    gfx.init("Pattern editor", w, h, d, x, y)
     gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
-
-
-    --reaper.Main_OnCommand(reaper.NamedCommandLookup("_S&M_WNMAIN"), 0) -- focus main window
 
     pattern.data = {}
     pattern.steps = 0
@@ -249,10 +250,10 @@ function itemSelected()
     cursor.line = 0
     cursor.patternOffsetLines = 0
 
-    if gui.selectedItem ~= nil then
-        pattern.editor = reaper.MIDIEditor_GetActive()
-        pattern.item = gui.selectedItem
-        pattern.take = reaper.GetMediaItemTake(gui.selectedItem, 0) -- get first media item take
+    if gui.selectedTake ~= nil then
+        pattern.editor = editor
+        pattern.take = take
+        pattern.item = reaper.GetMediaItemTake_Item(take)
         if pattern.take then
             itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
             retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
@@ -842,11 +843,10 @@ function loop()
         lastPatternUpdateTime = lastPatternEditTime
     end
 
-    local item = reaper.GetSelectedMediaItem(0, 0) -- get first selected media item
-    if gui.selectedItem ~= item then
-        gui.selectedItem = item
-        if item == nil then pattern.editor = nil end
-        itemSelected()
+    local editor = reaper.MIDIEditor_GetActive()
+    local take = reaper.MIDIEditor_GetTake(editor)
+    if gui.selectedTake ~= take then
+        takeChanged(editor, take)
     end
 
     muteTones()
