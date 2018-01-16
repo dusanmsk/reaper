@@ -11,9 +11,6 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - vratit sa k moznosti mat stale otvoreny editor a len preklikavat itemy
-    - preskumat ci nepojde pouzit close midi editor a potom MIDIEditor_LastFocused_OnCommand
-
     - loud mode bude mat 3 rezimy:
         - off
         - single track
@@ -521,7 +518,7 @@ end
 function updateEditorGrid()
     -- todo open editor, do action, close editor
     local cmdId = gridSizeToSWSAction[gui.gridSize]
-    if cmdId then reaper.MIDIEditor_OnCommand(editor, cmdId) end
+    if cmdId then reaper.MIDIEditor_LastFocused_OnCommand(cmdId, false) end
 end
 
 function incrementStepSize()
@@ -667,8 +664,8 @@ function loadMidiClip(readSysexProperties)
     if readSysexProperties then loadPatternSysexProperties() end
 
     -- todo unquantize original midi clip by reaper action before read
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40402) -- unquantize
+    reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
+    reaper.MIDIEditor_LastFocused_OnCommand(40402, false) -- unquantize
 
     -- read notes
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
@@ -736,9 +733,9 @@ function saveMidiClip()
     savePatternSysexProperties()
     -- todo is swing then call quantize on midi editor
     -- todo open editor, do action, close editor
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40729) -- quantize to grid
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40214) -- unselect all
+    reaper.MIDIEditor_LastFocused_OnCommand( 40003, false) -- select all
+    reaper.MIDIEditor_LastFocused_OnCommand( 40729, false) -- quantize to grid
+    reaper.MIDIEditor_LastFocused_OnCommand( 40214, false) -- unselect all
 
 end
 
