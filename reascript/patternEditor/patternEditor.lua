@@ -11,10 +11,8 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - zvazit ci je sposob nastavovania dlzky not sposobom "ton hra az po znak ===" spravny a ci by to nemohlo byt skor naopak,
-      tzn. jeden riadok povedzme "A-5" by bola nota dlha gridsize a pokial by mala hrat dlhsie tak pouzit nejaku specialnu klavesu
-      na jej predlzenie (napr. \). A zobrazit to ako "-|-" napr. alebo " | "
-      Alebo lepsie - globalny settings ktory prepne dlzku not na pattern/grid - nezabudnut ulozit ako sysex
+    - vratit sa k moznosti mat stale otvoreny editor a len preklikavat itemy
+    - preskumat ci nepojde pouzit close midi editor a potom MIDIEditor_LastFocused_OnCommand
 
     - loud mode bude mat 3 rezimy:
         - off
@@ -27,8 +25,11 @@ TODO:
 30 ppq = 1/128
  ]]
 
-gui = {}
+MIDI_CLIP_SAVE_UPDATE_TIME = 0.5
+MIDI_CLIP_LOAD_UPDATE_TIME = 2
 
+
+gui = {}
 gui.fontsize = 20
 gui.trackColumns = 4
 gui.numOfTracks = 8
@@ -42,7 +43,53 @@ gui.loudMode = false
 gui.stepSize = 1
 gui.gridSize = 16
 gui.editMode = false
+gui.octave = 4
 gui.defaultVelocity = 32
+
+cursor = {}
+cursor.track = 0
+cursor.column = 0
+cursor.line = 0
+
+NOTE_OFF = -1
+
+keycodes = {}
+keycodes.rightArrow = 1919379572
+keycodes.leftArrow = 1818584692
+keycodes.upArrow = 30064
+keycodes.downArrow = 1685026670
+keycodes.octaveDown = 47
+keycodes.octaveUp = 42
+keycodes.space = 32
+keycodes.pageUp = 1885828464
+keycodes.pageDown = 1885824110
+keycodes.homeKey = 1752132965
+keycodes.endKey = 6647396
+keycodes.deleteKey = 6579564
+keycodes.insertKey = 6909555
+keycodes.escKey = 27
+keycodes.enter = 13
+keycodes.f2 = 26162
+keycodes.f3 = 26163
+keycodes.f4 = 26164
+keycodes.f5 = 26165
+keycodes.f6 = 26166
+keycodes.f7 = 26167
+keycodes.f8 = 26168
+keycodes.space = 32
+
+
+pattern = {}
+pattern.data = {}
+pattern.editor = {}
+pattern.item = nil
+pattern.take = nil
+pattern.steps = 0
+
+
+global = {}
+
+
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
@@ -64,10 +111,6 @@ gui.getNumOfVisiblePatternLines = function()
     return numOfLines
 end
 
-cursor = {}
-cursor.track = 0
-cursor.column = 0
-cursor.line = 0
 cursor.down = function()
     for i = 1, gui.stepSize, 1 do
         cursor.line = cursor.line + 1
@@ -119,43 +162,6 @@ cursor.toGuiLine = function(patternIndex)
     return math.floor(patternIndex / 128 * gui.gridSize)
 end
 
-
-MIDI_CLIP_SAVE_UPDATE_TIME = 0.5
-MIDI_CLIP_LOAD_UPDATE_TIME = 2
-
-
-
-NOTE_OFF = -1
-
-keycodes = {}
-keycodes.rightArrow = 1919379572
-keycodes.leftArrow = 1818584692
-keycodes.upArrow = 30064
-keycodes.downArrow = 1685026670
-keycodes.octaveDown = 47
-keycodes.octaveUp = 42
-keycodes.space = 32
-keycodes.pageUp = 1885828464
-keycodes.pageDown = 1885824110
-keycodes.homeKey = 1752132965
-keycodes.endKey = 6647396
-keycodes.deleteKey = 6579564
-keycodes.insertKey = 6909555
-keycodes.escKey = 27
-keycodes.enter = 13
-keycodes.f2 = 26162
-keycodes.f3 = 26163
-keycodes.f4 = 26164
-keycodes.f5 = 26165
-keycodes.f6 = 26166
-keycodes.f7 = 26167
-keycodes.f8 = 26168
-
-keycodes.space = 32
-
-global = {}
-gui.octave = 4
-
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
 end
@@ -168,12 +174,6 @@ function err(m)
     msg = "Error" .. m
     dbg(msg)
 end
-
-pattern = {}
-pattern.data = {}
-pattern.tracks = {}
-pattern.steps = 0
-cursor.patternOffsetLines = 0
 
 pattern.scrollUp = function()
     cursor.patternOffsetLines = cursor.patternOffsetLines - 1
@@ -198,6 +198,7 @@ pattern.init = function(steps)
 end
 
 pattern.getRecord = function(position, track)
+    if pattern == nil or pattern.data == nil or pattern.data[position] == nil or pattern.data[position][track] == nil then return nil end
     return pattern.data[position][track]
 end
 
@@ -227,30 +228,34 @@ function linesToBeats(lines)
 end
 
 
-function init()
+function initGui()
     gfx.init("Pattern editor", 800, 800, 0)
     gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
-    -- gfx.dock(1) -- todo store/restore
+    gfx.dock(1) -- todo store/restore
+end
 
-    pattern.tracks = {}
-    for i = 0, gui.numOfTracks, 1 do
-        pattern.tracks[i] = {}
-    end
+function initPattern()
+    pattern.data = {}
+    pattern.steps = 0
 
     cursor.track = 0
     cursor.column = 0
     cursor.line = 0
     cursor.patternOffsetLines = 0
 
-    pattern.editor = reaper.MIDIEditor_GetActive()
-    if pattern.editor then
-        pattern.take = reaper.MIDIEditor_GetTake(pattern.editor)
-        pattern.item = reaper.GetMediaItemTake_Item(pattern.take)
-        itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
-        retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-        pattern.init(beatsToPatternSteps(fullbeatsOutOptional))
-        refreshPattern(true)
+    if gui.selectedItem ~= nil then
+        pattern.item = gui.selectedItem
+        pattern.editor = reaper.MIDIEditor_GetActive()
+        pattern.take = reaper.GetMediaItemTake(gui.selectedItem, 0) -- get first media item take
+        if pattern.take then
+            itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
+            retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
+            if retval then
+                pattern.init(beatsToPatternSteps(fullbeatsOutOptional))
+                refreshPattern(true)
+            end
+        end
     end
 end
 
@@ -514,8 +519,9 @@ function incrementGrid()
 end
 
 function updateEditorGrid()
+    -- todo open editor, do action, close editor
     local cmdId = gridSizeToSWSAction[gui.gridSize]
-    if cmdId then reaper.MIDIEditor_OnCommand(pattern.editor, cmdId) end
+    if cmdId then reaper.MIDIEditor_OnCommand(editor, cmdId) end
 end
 
 function incrementStepSize()
@@ -729,9 +735,11 @@ function saveMidiClip()
 
     savePatternSysexProperties()
     -- todo is swing then call quantize on midi editor
+    -- todo open editor, do action, close editor
     reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
     reaper.MIDIEditor_OnCommand(pattern.editor, 40729) -- quantize to grid
     reaper.MIDIEditor_OnCommand(pattern.editor, 40214) -- unselect all
+
 end
 
 function setColorByLine(lineno)
@@ -759,13 +767,14 @@ end
 
 
 function drawAllTracks()
-
-    local numOfLines = gui.getNumOfVisiblePatternLines()
-    if numOfLines <= 1 then
-        numOfLines = 2 -- always draw at least zero line
-    end
-    for idx = 0, numOfLines - 1, 1 do
-        drawPatternLine(idx)
+    if pattern.steps > 0 then
+        local numOfLines = gui.getNumOfVisiblePatternLines()
+        if numOfLines <= 1 then
+            numOfLines = 2 -- always draw at least zero line
+        end
+        for idx = 0, numOfLines - 1, 1 do
+            drawPatternLine(idx)
+        end
     end
 
     -- all tracks
@@ -827,20 +836,18 @@ function loop()
         lastPatternUpdateTime = lastPatternEditTime
     end
 
-    -- if not in editing mode, update pattern from its original midi clip periodically
-    -- temp disabled due to @see todo
-    --    if not gui.editMode and now - lastPatternLoadTime > MIDI_CLIP_LOAD_UPDATE_TIME then
-    --        dbg("load")
-    --        loadMidiClip()
-    --        lastPatternLoadTime = now
-    --    end
+    local item = reaper.GetSelectedMediaItem(0, 0) -- get first selected media item
+    if gui.selectedItem ~= item then
+        gui.selectedItem = item
+        initPattern()
+    end
 
     muteTones()
     update()
     reaper.defer(loop)
 end
 
-init()
+initGui()
 
 --debugColumns()
 loop()
