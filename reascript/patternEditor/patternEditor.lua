@@ -11,6 +11,9 @@ space - toggle play
 esc - toggle edit mode
 
 TODO:
+    - NOTE to ci je stlaceny shift/ctrl mozno pojde vycitat z mouse_cap
+    - namiesto item selected kontrolovat zmenu obsahu midi editoru (zmenu itemu ci take)
+
     - loud mode bude mat 3 rezimy:
         - off
         - single track
@@ -225,14 +228,19 @@ function linesToBeats(lines)
 end
 
 
-function initGui()
-    gfx.init("Pattern editor", 800, 800, 0)
+function itemSelected()
+
+    local __,x,y,w,h = gfx.dock(-1,0,0,0,0)
+    gfx.quit()
+    reaper.Main_OnCommand(40153, 0) -- open midi editor
+
+    gfx.init("my window", w, h, 0, x, y)
     gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
-    gfx.dock(1) -- todo store/restore
-end
 
-function initPattern()
+
+    --reaper.Main_OnCommand(reaper.NamedCommandLookup("_S&M_WNMAIN"), 0) -- focus main window
+
     pattern.data = {}
     pattern.steps = 0
 
@@ -242,8 +250,8 @@ function initPattern()
     cursor.patternOffsetLines = 0
 
     if gui.selectedItem ~= nil then
-        pattern.item = gui.selectedItem
         pattern.editor = reaper.MIDIEditor_GetActive()
+        pattern.item = gui.selectedItem
         pattern.take = reaper.GetMediaItemTake(gui.selectedItem, 0) -- get first media item take
         if pattern.take then
             itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
@@ -516,7 +524,6 @@ function incrementGrid()
 end
 
 function updateEditorGrid()
-    -- todo open editor, do action, close editor
     local cmdId = gridSizeToSWSAction[gui.gridSize]
     if cmdId then reaper.MIDIEditor_LastFocused_OnCommand(cmdId, false) end
 end
@@ -592,7 +599,7 @@ function reaperTogglePlay()
     local patternItemPositionSec = reaper.TimeMap2_beatsToTime(0, beats, 0)
     local itemPositionSec = reaper.GetMediaItemInfo_Value(pattern.item, "D_POSITION")
     local globalPositionSec = itemPositionSec + patternItemPositionSec
-    reaper.Main_OnCommand(40044, 0)
+    reaper.Main_OnCommand(40044, 0)  -- transport play/stop
     reaper.SetEditCurPos(globalPositionSec, true, true)
 end
 
@@ -661,9 +668,12 @@ end
 -- loads data from midi clip
 function loadMidiClip(readSysexProperties)
 
+    if pattern.editor == nil then return end
+
     if readSysexProperties then loadPatternSysexProperties() end
 
     -- todo unquantize original midi clip by reaper action before read
+
     reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
     reaper.MIDIEditor_LastFocused_OnCommand(40402, false) -- unquantize
 
@@ -701,6 +711,8 @@ end
 
 -- save pattern data to midi clip
 function saveMidiClip()
+
+    if pattern.editor == nil then return end
 
     -- delete all notes in midi clip
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
@@ -822,9 +834,6 @@ lastPatternUpdateTime = 0
 lastPatternLoadTime = 0
 function loop()
     keyWasPressed = processKeyboard()
-    if keyWasPressed == true then
-        update()
-    end
 
     -- do not save pattern to midi clip immediately, but update after no edit for some time
     local now = math.floor(os.clock())
@@ -836,15 +845,14 @@ function loop()
     local item = reaper.GetSelectedMediaItem(0, 0) -- get first selected media item
     if gui.selectedItem ~= item then
         gui.selectedItem = item
-        initPattern()
+        if item == nil then pattern.editor = nil end
+        itemSelected()
     end
 
     muteTones()
     update()
     reaper.defer(loop)
 end
-
-initGui()
 
 --debugColumns()
 loop()
