@@ -70,6 +70,7 @@ keycodes.deleteKey = 6579564
 keycodes.insertKey = 6909555
 keycodes.escKey = 27
 keycodes.enter = 13
+keycodes.f1 = 26161
 keycodes.f2 = 26162
 keycodes.f3 = 26163
 keycodes.f4 = 26164
@@ -231,7 +232,7 @@ end
 
 function storeWindowDimensions()
     local d, x, y, w, h = gfx.dock(-1, 0, 0, 0, 0)
-    if  w > 0 and h > 0 then -- skip first run
+    if  w > 0 and h > 0 then -- skip first run when windows is intialized with zeros
         reaper.SetExtState("pattern_editor", "window.x", tostring(x), false)
         reaper.SetExtState("pattern_editor", "window.y", tostring(y), false)
         reaper.SetExtState("pattern_editor", "window.w", tostring(w), false)
