@@ -16,6 +16,23 @@ TODO:
       na jej predlzenie (napr. \). A zobrazit to ako "-|-" napr. alebo " | "
       Alebo lepsie - globalny settings ktory prepne dlzku not na pattern/grid - nezabudnut ulozit ako sysex
 
+      TODO - obzivnut myslienku namiesto noteoff pouzivat notehold, tzn. pokail by nota mala byt na 4 riadky, tak nebude v strukture ulozena ako
+      C-4
+      nil
+      nil
+      nil
+      NOTE-OFF
+
+      ale
+      C-4
+      hold
+      hold
+      hold
+      nil
+
+      To umozni jednoduchsiu implementaciu bodu nadtymto - detekciu ci je stopa volna a ci je do nej mozne vlozit ton z midi clipu ktory nevznikol v pattern editore
+
+
     - loud mode bude mat 3 rezimy:
         - off
         - single track
