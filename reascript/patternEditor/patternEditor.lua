@@ -1,20 +1,24 @@
 --[[
 Keys:
-f2 - decrease grid size
-f3 - increase grid size
-f4 - turn on loud mode
+f1 - decrease step size
+f2 - increase step size
+f3 - decrease grid size
+f4 - increase grid size
 f5 - refresh pattern (from reaper item, will be refreshed automatically when enabling edit mode)
-f6 - decrease step size
-f7 - increase step size
-f8 - toggle note length mode
+f6 - turn on loud mode
+f7 - toggle note length mode
 space - toggle play
 esc - toggle edit mode
 
 TODO:
-    - zvazit ci je sposob nastavovania dlzky not sposobom "ton hra az po znak ===" spravny a ci by to nemohlo byt skor naopak,
-      tzn. jeden riadok povedzme "A-5" by bola nota dlha gridsize a pokial by mala hrat dlhsie tak pouzit nejaku specialnu klavesu
-      na jej predlzenie (napr. \). A zobrazit to ako "-|-" napr. alebo " | "
-      Alebo lepsie - globalny settings ktory prepne dlzku not na pattern/grid - nezabudnut ulozit ako sysex
+    - vobec nijak nie je poriesene ked loadujem midi clip ktory nepochadza z pattern editoru a su v nom paralelne noty.
+    bud to poriesit nejak elegantne, alebo sa na to vykaslat a neumoznit editovat klipy ktore nemaju pattern editor sysexy
+
+    Mozno by to slo spravit tak, ze pokial to nie je original "pattern" midi clip, pouzit nejaku special importovaciu funkciu,
+    ktora by proste plnila tracky tak, ze pokial v tracku v danom bloku (ktory zabere prave parsovana nota) nic nehra,
+    tak sa pouzije, inak sa pouzije dalsi track atd...
+
+    - NOTE to ci je stlaceny shift/ctrl mozno pojde vycitat z mouse_cap
 
       TODO - obzivnut myslienku namiesto noteoff pouzivat notehold, tzn. pokail by nota mala byt na 4 riadky, tak nebude v strukture ulozena ako
       C-4
@@ -44,23 +48,73 @@ TODO:
 30 ppq = 1/128
  ]]
 
-gui = {}
+MIDI_CLIP_SAVE_UPDATE_TIME = 0.5
+MIDI_CLIP_LOAD_UPDATE_TIME = 2
 
+
+gui = {}
 gui.fontsize = 20
 gui.trackColumns = 4
 gui.numOfTracks = 8
 gui.displayLines = 32
 gui.lineColOffset = 5
-gui.lineColWidth = 30
+gui.lineColWidth = 33
 gui.trackSize = 110
 gui.patternStartLine = 3
 gui.patternVisibleLines = 0
 gui.loudMode = false
 gui.stepSize = 1
-gui.gridSize = 16
+gui.gridSize = 128
 gui.editMode = false
+gui.octave = 4
 gui.defaultVelocity = 32
-gui.noteLengthMode = "grid"     -- allowed values "grid" (note length will be always grid length, you do not need to use noteoff - dedicated especially for drum patterns) and "full" (you need to use noteoff to set note length)
+gui.selectedTake = nil
+
+cursor = {}
+cursor.track = 0
+cursor.column = 0
+cursor.line = 0
+
+NOTE_OFF = -1
+
+keycodes = {}
+keycodes.rightArrow = 1919379572
+keycodes.leftArrow = 1818584692
+keycodes.upArrow = 30064
+keycodes.downArrow = 1685026670
+keycodes.octaveDown = 47
+keycodes.octaveUp = 42
+keycodes.space = 32
+keycodes.pageUp = 1885828464
+keycodes.pageDown = 1885824110
+keycodes.homeKey = 1752132965
+keycodes.endKey = 6647396
+keycodes.deleteKey = 6579564
+keycodes.insertKey = 6909555
+keycodes.escKey = 27
+keycodes.enter = 13
+keycodes.f1 = 26161
+keycodes.f2 = 26162
+keycodes.f3 = 26163
+keycodes.f4 = 26164
+keycodes.f5 = 26165
+keycodes.f6 = 26166
+keycodes.f7 = 26167
+keycodes.f8 = 26168
+keycodes.space = 32
+
+
+pattern = {}
+pattern.data = {}
+pattern.editor = {}
+pattern.item = nil
+pattern.take = nil
+pattern.steps = 0
+
+
+global = {}
+
+
 
 gui.update = function(patternLength)
     gui.displayLines = math.floor(gfx.h / gui.fontsize) - 1
@@ -82,10 +136,6 @@ gui.getNumOfVisiblePatternLines = function()
     return numOfLines
 end
 
-cursor = {}
-cursor.track = 0
-cursor.column = 0
-cursor.line = 0
 cursor.down = function()
     for i = 1, gui.stepSize, 1 do
         cursor.line = cursor.line + 1
@@ -137,43 +187,6 @@ cursor.toGuiLine = function(patternIndex)
     return math.floor(patternIndex / 128 * gui.gridSize)
 end
 
-
-MIDI_CLIP_SAVE_UPDATE_TIME = 0.5
-MIDI_CLIP_LOAD_UPDATE_TIME = 2
-
-
-
-NOTE_OFF = -1
-
-keycodes = {}
-keycodes.rightArrow = 1919379572
-keycodes.leftArrow = 1818584692
-keycodes.upArrow = 30064
-keycodes.downArrow = 1685026670
-keycodes.octaveDown = 47
-keycodes.octaveUp = 42
-keycodes.space = 32
-keycodes.pageUp = 1885828464
-keycodes.pageDown = 1885824110
-keycodes.homeKey = 1752132965
-keycodes.endKey = 6647396
-keycodes.deleteKey = 6579564
-keycodes.insertKey = 6909555
-keycodes.escKey = 27
-keycodes.enter = 13
-keycodes.f2 = 26162
-keycodes.f3 = 26163
-keycodes.f4 = 26164
-keycodes.f5 = 26165
-keycodes.f6 = 26166
-keycodes.f7 = 26167
-keycodes.f8 = 26168
-
-keycodes.space = 32
-
-global = {}
-gui.octave = 4
-
 function dbg(m)
     return reaper.ShowConsoleMsg(tostring(m) .. "\n")
 end
@@ -186,12 +199,6 @@ function err(m)
     msg = "Error" .. m
     dbg(msg)
 end
-
-pattern = {}
-pattern.data = {}
-pattern.tracks = {}
-pattern.steps = 0
-cursor.patternOffsetLines = 0
 
 pattern.scrollUp = function()
     cursor.patternOffsetLines = cursor.patternOffsetLines - 1
@@ -216,6 +223,7 @@ pattern.init = function(steps)
 end
 
 pattern.getRecord = function(position, track)
+    if pattern == nil or pattern.data == nil or pattern.data[position] == nil or pattern.data[position][track] == nil then return nil end
     return pattern.data[position][track]
 end
 
@@ -245,32 +253,63 @@ function linesToBeats(lines)
 end
 
 
-function init()
-    gfx.init("Pattern editor", 800, 800, 0)
+function storeWindowDimensions()
+    local d, x, y, w, h = gfx.dock(-1, 0, 0, 0, 0)
+    if  w > 0 and h > 0 then -- skip first run when windows is intialized with zeros
+        reaper.SetExtState("pattern_editor", "window.x", tostring(x), false)
+        reaper.SetExtState("pattern_editor", "window.y", tostring(y), false)
+        reaper.SetExtState("pattern_editor", "window.w", tostring(w), false)
+        reaper.SetExtState("pattern_editor", "window.h", tostring(h), false)
+    end
+end
+
+function loadWindowDimensions()
+    local x = tonumber(reaper.GetExtState("pattern_editor", "window.x")) or 100
+    local y = tonumber(reaper.GetExtState("pattern_editor", "window.y")) or 100
+    local w = tonumber(reaper.GetExtState("pattern_editor", "window.w")) or 200
+    local h = tonumber(reaper.GetExtState("pattern_editor", "window.h")) or 200
+    return x, y, w, h
+end
+
+function initGui()
+    local x, y, w, h = loadWindowDimensions()
+    gfx.quit()
+    gfx.init("Pattern editor", w, h, 0, x, y)
     gfx.setfont(1, "Monospace", gui.fontsize)
     gfx.clear = 55
-    -- gfx.dock(1) -- todo store/restore
+end
 
-    pattern.tracks = {}
-    for i = 0, gui.numOfTracks, 1 do
-        pattern.tracks[i] = {}
-    end
+function exit()
+    storeWindowDimensions()
+end
+
+function takeChanged(editor, take)
+
+    gui.selectedTake = take
+
+    storeWindowDimensions()
+    initGui()
+
+    pattern.data = {}
+    pattern.steps = 0
 
     cursor.track = 0
     cursor.column = 0
     cursor.line = 0
     cursor.patternOffsetLines = 0
 
-    pattern.editor = reaper.MIDIEditor_GetActive()
-    if pattern.editor then
-        pattern.take = reaper.MIDIEditor_GetTake(pattern.editor)
-        pattern.item = reaper.GetMediaItemTake_Item(pattern.take)
-        itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
-        retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-        pattern.init(beatsToPatternSteps(fullbeatsOutOptional))
-        loadMidiClip()
-        -- todo calculate grid size from note length
-        update()
+    if gui.selectedTake ~= nil then
+        pattern.editor = editor
+        pattern.take = take
+        pattern.item = reaper.GetMediaItemTake_Item(take)
+        if pattern.take then
+            itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
+            retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
+            if retval then
+                pattern.init(beatsToPatternSteps(fullbeatsOutOptional))
+                refreshPattern(true)
+            end
+        end
     end
 end
 
@@ -425,13 +464,13 @@ function toggleEditMode()
         --reaper.Undo_OnStateChange_Item(0, "TODO1", pattern.item)
         --reaper.Undo_EndBlock("TODO2", 4)
     else
-        refreshPattern()
+        refreshPattern(false)
     end
     gui.editMode = not gui.editMode
 end
 
-function refreshPattern()
-    loadMidiClip()
+function refreshPattern(readSysexProperties)
+    loadMidiClip(readSysexProperties)
     update()
 end
 
@@ -535,7 +574,7 @@ end
 
 function updateEditorGrid()
     local cmdId = gridSizeToSWSAction[gui.gridSize]
-    if cmdId then reaper.MIDIEditor_OnCommand(pattern.editor, cmdId) end
+    if cmdId then reaper.MIDIEditor_LastFocused_OnCommand(cmdId, false) end
 end
 
 function incrementStepSize()
@@ -576,17 +615,17 @@ function processKey(key)
         if key == keycodes.octaveDown then changeOctave(-1) end
         if key == keycodes.deleteKey then deleteUnderCursor() end
         if key == keycodes.homeKey then cursor.patternOffsetLines = 0 end
-        if key == keycodes.endKey then cursor.patternOffsetLines = pattern.steps - gui.patternVisibleLines end
+        if key == keycodes.endKey then cursor.patternOffsetLines = cursor.toGuiLine(pattern.steps) - gui.patternVisibleLines; cursor.line = gui.patternVisibleLines - 1 end
         -- todo checks inside patter class
         if key == keycodes.pageDown then cursor.pageDown() end
         if key == keycodes.pageUp then cursor.pageUp() end
-        if key == keycodes.f2 then decrementGrid() end
-        if key == keycodes.f3 then incrementGrid() end
-        if key == keycodes.f4 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f1 then decrementStepSize() end
+        if key == keycodes.f2 then incrementStepSize() end
+        if key == keycodes.f3 then decrementGrid() end
+        if key == keycodes.f4 then incrementGrid() end
         if key == keycodes.f5 then refreshPattern() end
-        if key == keycodes.f6 then decrementStepSize() end
-        if key == keycodes.f7 then incrementStepSize() end
-        if key == keycodes.f8 then toggleNoteLengthMode() end
+        if key == keycodes.f6 then gui.loudMode = not gui.loudMode; playSelectedLine(); end
+        if key == keycodes.f7 then toggleNoteLengthMode() end
         if key == keycodes.space then reaperTogglePlay() end
         if key == keycodes.escKey then toggleEditMode() end
 
@@ -598,8 +637,8 @@ end
 
 
 function toggleNoteLengthMode()
-    if gui.noteLengthMode == "grid" then gui.noteLengthMode = "full"; return; end
-    gui.noteLengthMode = "grid"
+    if pattern.noteLengthMode == "grid" then pattern.noteLengthMode = "full"; return; end
+    pattern.noteLengthMode = "grid"
 end
 
 function reaperTogglePlay()
@@ -609,7 +648,7 @@ function reaperTogglePlay()
     local patternItemPositionSec = reaper.TimeMap2_beatsToTime(0, beats, 0)
     local itemPositionSec = reaper.GetMediaItemInfo_Value(pattern.item, "D_POSITION")
     local globalPositionSec = itemPositionSec + patternItemPositionSec
-    reaper.Main_OnCommand(40044, 0)
+    reaper.Main_OnCommand(40044, 0) -- transport play/stop
     reaper.SetEditCurPos(globalPositionSec, true, true)
 end
 
@@ -648,7 +687,9 @@ end
 -- return note length (in pattern positions)
 function getPatternNoteLength(patternPosition, trackNo)
 
-    if gui.noteLengthMode == "grid" then return gui.gridSize end
+    if pattern.noteLengthMode == "grid" then
+        return 128 / gui.gridSize
+    end
 
     -- iterate over track, note length is until (new note or note_off or pattern end) occure
     for i = patternPosition + 1, pattern.steps - 1, 1 do
@@ -674,12 +715,18 @@ function isPossibleToIncrementGrid()
 end
 
 -- loads data from midi clip
-function loadMidiClip()
+function loadMidiClip(readSysexProperties)
 
-    loadPatternSysexProperties()
+    if pattern.editor == nil then return end
+
+    gui.gridSize = 128
+    pattern.noteLengthMode = "full"
+    if readSysexProperties then loadPatternSysexProperties() end
+
     -- todo unquantize original midi clip by reaper action before read
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40402) -- unquantize
+
+    reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
+    reaper.MIDIEditor_LastFocused_OnCommand(40402, false) -- unquantize
 
     -- read notes
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
@@ -691,8 +738,9 @@ function loadMidiClip()
                 posEnd = ppq2patternPosition(endppqpos)
 
                 if posStart < pattern.steps and posEnd <= pattern.steps then
+
                     -- place note end into pattern (do not place last note end behind pattern - pattern boundary will end it automatically)
-                    if (posEnd < pattern.steps) then
+                    if (posEnd < pattern.steps and pattern.noteLengthMode == "full") then
                         rec = {}
                         rec.pitch = NOTE_OFF
                         pattern.setRecord(posEnd, trackNo, rec)
@@ -715,6 +763,8 @@ end
 -- save pattern data to midi clip
 function saveMidiClip()
 
+    if pattern.editor == nil then return end
+
     -- delete all notes in midi clip
     retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
     for i = 0, notecnt, 1 do
@@ -731,7 +781,6 @@ function saveMidiClip()
                 if record.pitch ~= nil and record.pitch ~= NOTE_OFF then
                     noteStart = patternPosition
                     noteLength = getPatternNoteLength(patternPosition, trackNo)
-                    dbg(noteLength)
                     reaper.MIDI_InsertNote(pattern.take, false, false,
                         patternPosition2ppq(noteStart),
                         patternPosition2ppq(noteStart) + patternPosition2ppq(noteLength),
@@ -746,9 +795,10 @@ function saveMidiClip()
 
     savePatternSysexProperties()
     -- todo is swing then call quantize on midi editor
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40003) -- select all
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40729) -- quantize to grid
-    reaper.MIDIEditor_OnCommand(pattern.editor, 40214) -- unselect all
+    -- todo open editor, do action, close editor
+    reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
+    reaper.MIDIEditor_LastFocused_OnCommand(40729, false) -- quantize to grid
+    reaper.MIDIEditor_LastFocused_OnCommand(40214, false) -- unselect all
 end
 
 function setColorByLine(lineno)
@@ -759,15 +809,15 @@ function setColorByLine(lineno)
     end
 end
 
-function drawPatternLineNumber(lineno, hiddenRecords)
+function drawPatternLineNumber(lineno)
     setColorByLine(lineno + cursor.patternOffsetLines) -- todo
     gfx.x = gui.lineColOffset
     gfx.y = gui.patternLine2y(lineno)
-    gfx.printf("%02d%s", lineno + cursor.patternOffsetLines, hiddenRecords and '.' or '')
+    gfx.printf("%02d", lineno + cursor.patternOffsetLines)
 end
 
 function drawPatternLine(line)
-    drawPatternLineNumber(line, true)
+    drawPatternLineNumber(line)
     for trackNo = 0, gui.numOfTracks, 1 do
         trackRec = pattern.getRecord(cursor.toPatternIndex(line + cursor.patternOffsetLines), trackNo)
         drawTrackEntry(trackRec, line, trackNo)
@@ -776,13 +826,14 @@ end
 
 
 function drawAllTracks()
-
-    local numOfLines = gui.getNumOfVisiblePatternLines()
-    if numOfLines <= 1 then
-        numOfLines = 2 -- always draw at least zero line
-    end
-    for idx = 0, numOfLines - 1, 1 do
-        drawPatternLine(idx)
+    if pattern.steps > 0 then
+        local numOfLines = gui.getNumOfVisiblePatternLines()
+        if numOfLines <= 1 then
+            numOfLines = 2 -- always draw at least zero line
+        end
+        for idx = 0, numOfLines - 1, 1 do
+            drawPatternLine(idx)
+        end
     end
 
     -- all tracks
@@ -795,31 +846,30 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s  NoteLen: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1, gui.noteLengthMode)
+    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s  NoteLen: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1, pattern.noteLengthMode)
 end
 
 
 function savePatternSysexProperties()
     for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
     reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, gui.gridSize)
-    --reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.swing)
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 1, 1, pattern.noteLengthMode)
 end
 
 function loadPatternSysexProperties()
-    local prop
-    prop = getSysexProperty(0)
+    gui.gridSize = 128
+    local prop = getSysexProperty(0)
     if prop then gui.gridSize = tonumber(prop) end
-    if gui.gridSize == nil or gui.gridSize < 1 then gui.gridSize = 16 end
 
-    --prop = getSysexProperty(1)
-    --if prop then pattern.swing = tonumber(prop) or 0 end
+    prop = getSysexProperty(1)
+    if prop then pattern.noteLengthMode = prop else pattern.noteLengthMode = "full" end
 
     -- todo more properties
 end
 
 function getSysexProperty(idx)
     retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, idx)
-    return data:sub(0, data:len() - 1)
+    if retval then return data:sub(0, data:len() - 1) else return nil end
 end
 
 function update()
@@ -834,10 +884,14 @@ end
 lastPatternUpdateTime = 0
 lastPatternLoadTime = 0
 function loop()
-    keyWasPressed = processKeyboard()
-    if keyWasPressed == true then
-        update()
+
+    local editor = reaper.MIDIEditor_GetActive()
+    local take = reaper.MIDIEditor_GetTake(editor)
+    if gui.selectedTake ~= take then
+        takeChanged(editor, take)
     end
+
+    keyWasPressed = processKeyboard()
 
     -- do not save pattern to midi clip immediately, but update after no edit for some time
     local now = math.floor(os.clock())
@@ -846,20 +900,13 @@ function loop()
         lastPatternUpdateTime = lastPatternEditTime
     end
 
-    -- if not in editing mode, update pattern from its original midi clip periodically
--- temp disabled due to @see todo
---    if not gui.editMode and now - lastPatternLoadTime > MIDI_CLIP_LOAD_UPDATE_TIME then
---        dbg("load")
---        loadMidiClip()
---        lastPatternLoadTime = now
---    end
-
     muteTones()
     update()
     reaper.defer(loop)
 end
 
-init()
+
+reaper.atexit(exit)
 
 --debugColumns()
 loop()
