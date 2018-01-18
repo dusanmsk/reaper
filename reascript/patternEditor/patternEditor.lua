@@ -55,6 +55,9 @@ TODO:
 30 ppq = 1/128
  ]]
 
+
+inspect = require 'inspect'
+
 MIDI_CLIP_SAVE_UPDATE_TIME = 0.5
 MIDI_CLIP_LOAD_UPDATE_TIME = 2
 
@@ -125,7 +128,7 @@ gui.gridSize = 16
 global = {}
 
 function dbg(m)
-    return reaper.ShowConsoleMsg(tostring(m) .. "\n")
+    return reaper.ShowConsoleMsg(inspect.inspect(m) .. "\n")
 end
 
 function trace(m)
@@ -187,12 +190,12 @@ cursor.left = function()
     if cursor.track < 0 then cursor.track = gui.numOfTracks - 1; cursor.column = gui.trackColumns - 1; end
 end
 cursor.pageDown = function()
-    for i = 1, gui.patternVisibleLines(), 1 do
+    for i = 1, gui.patternVisibleLines, 1 do
         cursor.down()
     end
 end
 cursor.pageUp = function()
-    for i = 1, gui.patternVisibleLines(), 1 do
+    for i = 1, gui.patternVisibleLines, 1 do
         cursor.up()
     end
 end
@@ -233,10 +236,9 @@ pattern.getRecord = function(line, track)
 end
 
 pattern.setRecord = function(line, track, rec)
-    if line > pattern.steps - 1 then
-        err("Invalid line")
-        return nil
-    end
+    dbg(line .. "," .. track)
+    assert(line >= 0 and line < pattern.steps)
+    assert(track >= 0 and track < gui.numOfTracks)
     pattern.data[line][track] = rec
 end
 
@@ -314,7 +316,7 @@ function takeChanged(editor, take)
         pattern.take = take
         pattern.item = reaper.GetMediaItemTake_Item(take)
         if pattern.take then
-            gui.gridSize =  128
+            gui.gridSize = 128
             itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
             retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
             if retval then
@@ -327,7 +329,7 @@ end
 
 function beatsToPatternLines(beats, gridSize)
     -- 1 beat = 32 1/128 notes or 2 1/8 notes or 1 1/4 note
-    return  math.floor(gridSize * beats / 4 )
+    return math.floor(gridSize * beats / 4)
 end
 
 function patternLinesToBeats(lines, gridSize)
@@ -495,29 +497,18 @@ end
 
 function insertNoteHoldAtCursor()
     -- note hold should be inserted only if previous record was note_hold or note
-    -- pattern track will be internally filled with note_holds without gaps
-    local line = gui.guiToPatternLine(cursor.line) - 1
-    if line < 0 then return end
-    local patternIndex = cursor.toPatternIndex(line)
-    local prev_rec = pattern.getRecord(patternIndex, cursor.track)
-    if prev_rec ~= nil and (prev_rec.pitch >= 0 or prev_rec.pitch == NOTE_HOLD) then
-        local rec = {}
-        rec.pitch = NOTE_HOLD
-        for i = 1, cursor.toPatternIndex(1) - 1, 1 do
-            insertRecordAt(patternIndex + i, rec)
-        end
-        return true
-    end
+    -- todo pattern track will be internally filled with note_holds without gaps
+    local line = gui.guiToPatternLine(cursor.line)
+    -- todo insert at cursor then insert back until first note over
     return false
 end
 
 function insertNoteAtCursor(pitch)
-    local rec = getNoteAtCursor() or {}
+    local rec = getNoteAtCursor()
+    if rec == nil then rec = {} end
     rec.pitch = toPitch(pitch)
     rec.velocity = rec.velocity or gui.defaultVelocity
-    if rec.pitch == NOTE_HOLD then rec.velocity = nil end
-    local patternIndex = cursor.toPatternIndex(cursor.line)
-    insertRecordAt(patternIndex, rec)
+    insertRecordAt(gui.guiToPatternLine(cursor.line), rec)
     return true
 end
 
@@ -606,15 +597,39 @@ gridSizeToSWSAction[1] = 40204
 
 
 function expandPattern()
-    -- todo expand pattern by 2, fill noteholds
-    dbg("expand")
+    holdRec = {}
+    holdRec.pitch = NOTE_HOLD
+    local newData = {}
+    local writeLine = 0
+    for readLine = 0, pattern.steps, 1 do
+        newData[writeLine] = {}
+        newData[writeLine + 1] = {}
+        for track = 0, gui.numOfTracks - 1, 1 do
+            local rec = pattern.getRecord(readLine, track)
+            if rec ~= nil then
+                newData[writeLine][track] = rec
+                if rec.pitch ~= nil then
+                    newData[writeLine + 1][track] = holdRec
+                end
+            end
+        end
+        writeLine = writeLine + 2
+    end
+    pattern.data = newData
     pattern.steps = pattern.steps * 2
 end
 
 function shrinkPattern()
-    dbg("shrink")
-    -- todo shrink pattern by 2
+    local newData = {}
+    if not isPossibleToShrinkPattern() then return end
+    local writeLine = 0
+    for readLine = 0, pattern.steps, 2 do
+        local rec = pattern.data[readLine]
+        newData[writeLine] = rec
+        writeLine = writeLine + 1
+    end
     pattern.steps = math.floor(pattern.steps / 2)
+    pattern.data = newData
 end
 
 function decrementGrid()
@@ -625,6 +640,7 @@ function decrementGrid()
         return
     end
     cursor.line = 0
+    gui.patternOffset = 0
     expandPattern()
     saveMidiClip()
 end
@@ -635,6 +651,7 @@ function incrementGrid()
     gui.gridSize = gui.gridSize / 2
     if gui.gridSize < 1 then gui.gridSize = 1 end
     cursor.line = 0
+    gui.patternOffset = 0
     savePatternSysexProperties()
     saveMidiClip()
 end
@@ -714,20 +731,14 @@ function reaperTogglePlay()
     reaper.SetEditCurPos(globalPositionSec, true, true)
 end
 
-function patternPosition2ppq(position)
+function line2ppq(position)
     -- 1/128 note = 30 ppq
-    return math.floor(position * 30)
+    return math.floor(position * 30 * 128 / gui.gridSize)
 end
 
-function ppq2patternPosition(position)
+function ppq2Line(position)
     -- 1/128 note = 30 ppq
-    return math.floor(position / 30)
-end
-
-
-function ppq2line(ppq)
-    -- todo grid size
-    return ppq / 480 * gui.gridSize / 2
+    return math.floor(position / 30 / 128 * gui.gridSize)
 end
 
 function round(value)
@@ -758,7 +769,6 @@ function getPatternNoteLength(patternSteps, trackNo)
             break
         end
     end
-    dbg("Notelen " .. noteLen)
     return noteLen
 end
 
@@ -793,8 +803,8 @@ function loadMidiClip(readSysexProperties)
         for noteIdx = 0, notecnt - 1, 1 do
             retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(pattern.take, noteIdx)
             if chan == trackNo then
-                posStart = ppq2patternPosition(startppqpos)
-                posEnd = ppq2patternPosition(endppqpos)
+                posStart = ppq2Line(startppqpos)
+                posEnd = ppq2Line(endppqpos)
 
                 if posStart < pattern.steps and posEnd <= pattern.steps then
 
@@ -843,12 +853,9 @@ function saveMidiClip()
                 if record.pitch ~= nil and record.pitch > 0 then
                     noteStart = line
                     noteLength = getPatternNoteLength(line, trackNo)
-                    dbg(noteStart)
-                    dbg(noteLength)
-                    dbg("---")
                     reaper.MIDI_InsertNote(pattern.take, false, false,
-                        patternPosition2ppq(noteStart),
-                        patternPosition2ppq(noteStart) + patternPosition2ppq(noteLength),
+                        line2ppq(noteStart),
+                        line2ppq(noteStart + noteLength),
                         trackNo,
                         record.pitch,
                         record.velocity,
@@ -970,8 +977,7 @@ end
 reaper.atexit(exit)
 
 
-gui.gridSize = 16
-pattern.init(16)
+
 --debugColumns()
 loop()
 
