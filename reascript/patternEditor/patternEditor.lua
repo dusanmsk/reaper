@@ -124,7 +124,7 @@ pattern.editor = {}
 pattern.item = nil
 pattern.take = nil
 pattern.steps = 0
-gui.gridSize = 16
+pattern.gridSize = 16
 
 
 global = {}
@@ -233,6 +233,7 @@ end
 pattern.init = function(steps)
     dbg("init " .. steps)
     pattern.steps = steps
+    pattern.data = {}
     for i = 0, steps - 1, 1 do
         pattern.data[i] = {}
         for trackNo = 0, gui.numOfTracks, 1 do
@@ -267,7 +268,7 @@ end
 
 function linesToBeats(lines)
     if lines == 0 then return 0 end
-    return lines / gui.gridSize
+    return lines / pattern.gridSize
 end
 
 
@@ -306,37 +307,6 @@ function detectMidiClipGridSize(take)
     return 8
 end
 
-function takeChanged(editor, take)
-
-    dbg("takechanged")
-    gui.selectedTake = take
-
-    storeWindowDimensions()
-    initGui()
-
-    pattern.data = {}
-    pattern.steps = 0
-
-    cursor.track = 0
-    cursor.column = 0
-    cursor.line = 0
-    gui.patternOffset = 0
-
-    if gui.selectedTake ~= nil then
-        pattern.editor = editor
-        pattern.take = take
-        pattern.item = reaper.GetMediaItemTake_Item(take)
-        if pattern.take then
-            gui.gridSize = 128
-            itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
-            retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
-            if retval then
-                pattern.init(beatsToPatternLines(fullbeatsOutOptional, gui.gridSize))
-                refreshPattern(true)
-            end
-        end
-    end
-end
 
 function beatsToPatternLines(beats, gridSize)
     -- 1 beat = 32 1/128 notes or 2 1/8 notes or 1 1/4 note
@@ -541,8 +511,8 @@ function insertNoteAtCursor(pitch)
     return true
 end
 
-function refreshPattern(readSysexProperties)
-    -- todo loadMidiClip(readSysexProperties)
+function refreshPattern()
+    loadPatternData()
     update()
 end
 
@@ -664,9 +634,9 @@ end
 
 function decrementGrid()
     -- todo expand noteholds
-    gui.gridSize = gui.gridSize * 2
-    if gui.gridSize > 128 then
-        gui.gridSize = 128
+    pattern.gridSize = pattern.gridSize * 2
+    if pattern.gridSize > 128 then
+        pattern.gridSize = 128
         return
     end
     cursor.line = 0
@@ -678,8 +648,8 @@ end
 function incrementGrid()
     if not isPossibleToShrinkPattern() then return end
     shrinkPattern()
-    gui.gridSize = gui.gridSize / 2
-    if gui.gridSize < 1 then gui.gridSize = 1 end
+    pattern.gridSize = pattern.gridSize / 2
+    if pattern.gridSize < 1 then pattern.gridSize = 1 end
     cursor.line = 0
     gui.patternOffset = 0
     savePatternSysexProperties()
@@ -687,7 +657,7 @@ function incrementGrid()
 end
 
 function updateEditorGrid()
-    local cmdId = gridSizeToSWSAction[gui.gridSize]
+    local cmdId = gridSizeToSWSAction[pattern.gridSize]
     if cmdId then reaper.MIDIEditor_LastFocused_OnCommand(cmdId, false) end
 end
 
@@ -763,12 +733,12 @@ end
 
 function line2ppq(position)
     -- 1/128 note = 30 ppq
-    return math.floor(position * 30 * 128 / gui.gridSize)
+    return math.floor(position * 30 * 128 / pattern.gridSize)
 end
 
 function ppq2Line(position)
     -- 1/128 note = 30 ppq
-    return math.floor(position / 30 / 128 * gui.gridSize)
+    return math.floor(position / 30 / 128 * pattern.gridSize)
 end
 
 function round(value)
@@ -825,54 +795,6 @@ function isPossibleToShrinkPattern()
     return true
 end
 
--- loads data from midi clip
-function loadMidiClip(readSysexProperties)
-
-    if pattern.editor == nil then return end
-
-    -- todo odstranit a prepisat loading
-    if readSysexProperties then loadPatternSysexProperties() end
-
-    -- todo unquantize original midi clip by reaper action before read
-
-    reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
-    reaper.MIDIEditor_LastFocused_OnCommand(40402, false) -- unquantize
-
-    -- read notes
-    retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
-    for trackNo = 0, gui.numOfTracks - 1, 1 do
-        for noteIdx = 0, notecnt - 1, 1 do
-            retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(pattern.take, noteIdx)
-            if chan == trackNo then
-                posStart = ppq2Line(startppqpos)
-                posEnd = ppq2Line(endppqpos)
-
-                if posStart < pattern.steps and posEnd <= pattern.steps then
-
-                    -- todo prerobit na notehold
-                    --[[
-                        -- place note end into pattern (do not place last note end behind pattern - pattern boundary will end it automatically)
-                        if (posEnd < pattern.steps and pattern.noteLengthModeWASREMOVED == "full") then
-                            rec = {}
-                            rec.pitch = NOTE_OFF
-                            pattern.setRecord(posEnd, trackNo, rec)
-                        end
-                        -- place note into pattern
-                        rec = {}
-                        rec.pitch = pitch
-                        rec.velocity = vel
-                        pattern.setRecord(posStart, trackNo, rec)
-                    --]]
-                end
-            end
-        end
-        -- TODO grid size
-    end
-
-    -- save it back again (applies quantization etc...)
-    saveMidiClip()
-end
-
 -- save pattern data to midi clip
 function saveMidiClip()
 
@@ -915,7 +837,7 @@ function saveMidiClip()
 end
 
 function setColorByLine(lineno)
-    if lineno % gui.gridSize == 0 then
+    if lineno % pattern.gridSize == 0 then
         setColor(WHITE_BRIGHT)
     else
         setColor(WHITE)
@@ -959,19 +881,19 @@ function drawMenus()
     setColor(WHITE)
     gfx.x = 0
     gfx.y = 0
-    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s", gui.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1)
+    gfx.printf("Grid: 1/%d  Step: %s  Edit mode: %s  Loud mode: %s  Octave: %s", pattern.gridSize, gui.stepSize, gui.toOnOffString(gui.editMode), gui.toOnOffString(gui.loudMode), gui.octave + 1)
 end
 
 
 function savePatternSysexProperties()
     for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
-    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, gui.gridSize)
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.gridSize)
 end
 
 function loadPatternSysexProperties()
-    gui.gridSize = 128
+    pattern.gridSize = 128
     local prop = getSysexProperty(0)
-    if prop then gui.gridSize = tonumber(prop) end
+    if prop then pattern.gridSize = tonumber(prop) end
 
     -- todo more properties
 end
@@ -988,6 +910,85 @@ function update()
     gfx.clear = 0 -- background color
     gfx.update()
 end
+
+
+function getPatternGridSizeFromTake(take)
+    -- todo read sysex
+    return nil
+end
+
+function importPatternDataFromUnknownMidiClip()
+    dbg("TODO import unknown midi clip")
+    pattern.gridSize = 128      -- import at 1/128
+    itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
+    retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
+    pattern.init(beatsToPatternLines(fullbeatsOutOptional, 128))
+
+
+    -- TODO
+end
+
+-- loads notes and cc from midi clip that was previously created by pattern editor
+function loadPatternData()
+    itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
+    retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
+    if retval then
+        pattern.init(beatsToPatternLines(fullbeatsOutOptional, pattern.gridSize))
+        -- unquantize original midi clip by reaper action before read
+        reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
+        reaper.MIDIEditor_LastFocused_OnCommand(40402, false) -- unquantize
+        -- read notes
+        retval, notecnt, ccevtcnt, textsyxevtcnt = reaper.MIDI_CountEvts(pattern.take)
+        for trackNo = 0, gui.numOfTracks - 1, 1 do
+            for noteIdx = 0, notecnt - 1, 1 do
+                retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(pattern.take, noteIdx)
+                if chan == trackNo then
+                    local posStart = ppq2Line(startppqpos)
+                    local noteLen = ppq2Line(endppqpos) - posStart
+                    if posStart < pattern.steps and posStart + noteLen <= pattern.steps then
+                        -- insert note into pattern
+                        local rec = {}
+                        rec.pitch = pitch
+                        rec.velocity = vel
+                        pattern.setRecord(posStart, trackNo, rec)
+                        -- then extend it length by real length
+                        for i = 1, noteLen - 1, 1 do
+                            pattern.setRecord(posStart + i, trackNo, NOTE_HOLD_REC)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function takeChanged(editor, take)
+
+    dbg("takechanged")
+    gui.selectedTake = take
+
+    storeWindowDimensions()
+    initGui()
+
+    cursor.track = 0
+    cursor.column = 0
+    cursor.line = 0
+    gui.patternOffset = 0
+
+    if take ~= nil then
+        pattern.editor = editor
+        pattern.take = take
+        pattern.item = reaper.GetMediaItemTake_Item(take)
+        -- check if take was previously initialized by pattern editor (will have stored gridsize)
+        pattern.gridSize = getPatternGridSizeFromTake(take)
+        if pattern.gridSize == nil then
+            importPatternDataFromUnknownMidiClip()
+        else
+            loadPatternData()
+        end
+    end
+end
+
 
 
 lastPatternUpdateTime = 0
@@ -1021,4 +1022,5 @@ reaper.atexit(exit)
 
 --debugColumns()
 loop()
+
 
