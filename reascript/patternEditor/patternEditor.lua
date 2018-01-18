@@ -439,11 +439,12 @@ end
 
 function deleteRecord(line, trackNo)
     local rec = pattern.getRecord(line, trackNo)
+    pattern.setRecord(line, trackNo, nil)
     -- if deleting note or notehold then delete all noteholds behind
     if isNote(rec) or isNoteHold(rec) then
-        for i = line, pattern.steps - line, 1 do
+        for i = line + 1, pattern.steps, 1 do
             rec = pattern.getRecord(i, trackNo)
-            if isNote(rec) or isNoteHold(rec) then
+            if isNoteHold(rec) then
                 pattern.setRecord(i, trackNo, nil)
             else
                 break
@@ -811,6 +812,15 @@ function isPossibleToShrinkPattern()
             local rec = pattern.getRecord(line, track)
             if rec and rec.pitch > 0 then return false end
         end
+    end
+    -- every note must be shrinkable to half
+    for track = 0, gui.numOfTracks, 1 do
+        local noteLengthSum = 0
+        for line = 0, pattern.steps - 1, 1 do
+            local rec = pattern.getRecord(line, track)
+            if isNote(rec) or isNoteHold(rec) then noteLengthSum = noteLengthSum + 1 end
+        end
+        if noteLengthSum % 2 ~= 0 then return false end
     end
     return true
 end
