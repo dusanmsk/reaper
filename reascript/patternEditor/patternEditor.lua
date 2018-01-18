@@ -79,7 +79,6 @@ gui.editMode = false
 gui.octave = 4
 gui.defaultVelocity = 32
 gui.selectedTake = nil
-gui.visualMode = "noteoff" -- "noteoff" / "notehold" todo
 
 cursor = {}
 cursor.track = 0
@@ -87,6 +86,9 @@ cursor.column = 0
 cursor.line = 0
 
 NOTE_HOLD = -1
+
+NOTE_HOLD_REC = { pitch = NOTE_HOLD }
+
 
 keycodes = {}
 keycodes.rightArrow = 1919379572
@@ -138,6 +140,15 @@ end
 function err(m)
     msg = "Error" .. m
     dbg(msg)
+end
+
+
+function isNote(rec)
+    return rec ~= nill and rec.pitch ~= nil and rec.pitch > 0
+end
+
+function isNoteHold(rec)
+    return rec ~= nill and rec.pitch ~= nil and rec.pitch == NOTE_HOLD
 end
 
 
@@ -340,7 +351,6 @@ end
 noteStrings = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" }
 function noteToString(pitch)
     if pitch == nil then return nil end
-    if pitch == NOTE_OFF then return "===" end
     octave = math.floor(pitch / 12)
     n = pitch - 12 * octave
     note = noteStrings[n + 1]
@@ -427,8 +437,19 @@ function drawTrack(trackNo)
     end
 end
 
-function deleteRecord(recordIndex, trackNo)
-    pattern.setRecord(recordIndex, trackNo, nil)
+function deleteRecord(line, trackNo)
+    local rec = pattern.getRecord(line, trackNo)
+    -- if deleting note or notehold then delete all noteholds behind
+    if isNote(rec) or isNoteHold(rec) then
+        for i = line, pattern.steps - line, 1 do
+            rec = pattern.getRecord(i, trackNo)
+            if isNote(rec) or isNoteHold(rec) then
+                pattern.setRecord(i, trackNo, nil)
+            else
+                break
+            end
+        end
+    end
     emitEdited()
 end
 
@@ -445,7 +466,7 @@ end
 
 currentToneTimestamps = {}
 function generateTone(pitch)
-    if pitch ~= NOTE_OFF then
+    if pitch > 0 then
         reaper.StuffMIDIMessage(0, 0x90, pitch, 0x60)
         currentToneTimestamps[pitch] = os.clock()
     end
@@ -495,12 +516,19 @@ function insertRecordAt(patternIndex, rec)
     emitEdited()
 end
 
-function insertNoteHoldAtCursor()
-    -- note hold should be inserted only if previous record was note_hold or note
+function insertNoteOffAtCursor()
     -- todo pattern track will be internally filled with note_holds without gaps
     local line = gui.guiToPatternLine(cursor.line)
-    -- todo insert at cursor then insert back until first note over
-    return false
+    pattern.setRecord(line, cursor.track, NOTE_HOLD_REC)
+    -- go backwards and insert noteholds until first note will be found
+    for i = line - 1, 0, -1 do
+        local rec = pattern.getRecord(i, cursor.track)
+        if isNote(rec) then
+            break
+        end
+        pattern.setRecord(i, cursor.track, NOTE_HOLD_REC)
+    end
+    return true
 end
 
 function insertNoteAtCursor(pitch)
@@ -548,18 +576,21 @@ function notePressed(key)
     if isKey(key, '9') then pitch = 25 end
     if isKey(key, 'o') then pitch = 26 end
     if isKey(key, '0') then pitch = 27 end
-    if key == keycodes.backslash then pitch = NOTE_HOLD end
+    if isKey(key, '`') then pitch = NOTE_HOLD end
 
     local inserted = false
     local rec = nil
     if gui.editMode then
         if pitch ~= nil then
             if pitch == NOTE_HOLD then
-                inserted = insertNoteHoldAtCursor()
+                inserted = insertNoteOffAtCursor()
             else
                 inserted = insertNoteAtCursor(pitch)
             end
-            if inserted then cursor.down() end
+            if inserted then
+                cursor.down()
+                emitEdited()
+            end
             generateTone(toPitch(pitch))
         end
     end
@@ -576,7 +607,7 @@ function deleteUnderCursor()
     if not gui.editMode == true then return end
     -- todo do not delete whole line, but only what is under cursor
     deleteRecord(gui.guiToPatternLine(cursor.line), cursor.track)
-    processKey(keycodes.downArrow)
+    cursor.down()
 end
 
 
@@ -597,8 +628,6 @@ gridSizeToSWSAction[1] = 40204
 
 
 function expandPattern()
-    holdRec = {}
-    holdRec.pitch = NOTE_HOLD
     local newData = {}
     local writeLine = 0
     for readLine = 0, pattern.steps, 1 do
@@ -609,7 +638,7 @@ function expandPattern()
             if rec ~= nil then
                 newData[writeLine][track] = rec
                 if rec.pitch ~= nil then
-                    newData[writeLine + 1][track] = holdRec
+                    newData[writeLine + 1][track] = NOTE_HOLD_REC
                 end
             end
         end
@@ -758,12 +787,12 @@ function getTakeLengthPPQ(take)
 end
 
 -- return note length (in pattern steps)
-function getPatternNoteLength(patternSteps, trackNo)
+function getPatternNoteLength(line, trackNo)
     -- iterate over track, note length is until end of note_hold block
     local noteLen = 1
-    for i = patternSteps + 1, pattern.steps - 1, 1 do
+    for i = line + 1, pattern.steps - 1, 1 do
         local rec = pattern.getRecord(i, trackNo)
-        if (rec ~= nil and rec.pitch == NOTE_HOLD) then
+        if isNoteHold(rec) then
             noteLen = noteLen + 1
         else
             break
@@ -774,7 +803,9 @@ end
 
 
 function isPossibleToShrinkPattern()
-    -- find odd records then false (ignore noteholds, they should be shrinked)
+    -- todo prerobit nasledovne:
+    -- na neparnych riadkoch nesmu byt noty
+    -- bloky notehold za notami musia byt delitelne dvomi
     for line = 1, pattern.steps - 1, 2 do
         for track = 0, gui.numOfTracks, 1 do
             local rec = pattern.getRecord(line, track)
