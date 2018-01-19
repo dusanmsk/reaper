@@ -272,6 +272,27 @@ function linesToBeats(lines)
 end
 
 
+-- serialize pattern properties to text form that should be stored to text sysex inside midi clip
+function serializePatternProperties(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
+    return string.format("patternEditor|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s", p1, p2,p3,p4,p5,p6,p7,p8,p9,p10)
+end
+
+-- deserialize pattern properties from sysex inside midi clip
+-- returns 10 properties (p1,p2,p3...) or nil if deserialization failed
+function deserializePatternProperties(s)
+    local idx = 0
+    local ret = {}
+    for word in string.gmatch(s, '([^|]+)') do
+        ret[idx] = word
+        idx = idx + 1
+    end
+    if ret[0] == "patternEditor" then
+        return ret[1], ret[2], ret[3], ret[4], ret[5], ret[6], ret[7], ret[8], ret[9], ret[10]
+    else
+        return nil
+    end
+end
+
 function storeWindowDimensions()
     local d, x, y, w, h = gfx.dock(-1, 0, 0, 0, 0)
     if w > 0 and h > 0 then -- skip first run when windows is intialized with zeros
@@ -621,7 +642,8 @@ end
 
 function shrinkPattern()
     local newData = {}
-    if not isPossibleToShrinkPattern() then return end
+    if not isPossibleToShrinkPattern() then return false end
+    if pattern.steps / 2 < 2 then return  false end
     local writeLine = 0
     for readLine = 0, pattern.steps, 2 do
         local rec = pattern.data[readLine]
@@ -630,6 +652,7 @@ function shrinkPattern()
     end
     pattern.steps = math.floor(pattern.steps / 2)
     pattern.data = newData
+    return true
 end
 
 function decrementGrid()
@@ -647,7 +670,9 @@ end
 
 function incrementGrid()
     if not isPossibleToShrinkPattern() then return end
-    shrinkPattern()
+    if not shrinkPattern() then
+        return
+    end
     pattern.gridSize = pattern.gridSize / 2
     if pattern.gridSize < 1 then pattern.gridSize = 1 end
     cursor.line = 0
@@ -886,21 +911,19 @@ end
 
 
 function savePatternSysexProperties()
+    -- todo delete only pattern editor sysex properties, not all
     for i = 0, 16, 1 do reaper.MIDI_DeleteTextSysexEvt(pattern.take, 0) end
-    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, pattern.gridSize)
+    local anotherProperty = 0 -- only as todo to show that is possible to store more properties
+    local serialized = serializePatternProperties(pattern.gridSize, anotherProperty)
+    reaper.MIDI_InsertTextSysexEvt(pattern.take, false, false, 0, 1, serialized)
 end
 
 function loadPatternSysexProperties()
-    pattern.gridSize = 128
-    local prop = getSysexProperty(0)
-    if prop then pattern.gridSize = tonumber(prop) end
-
-    -- todo more properties
-end
-
-function getSysexProperty(idx)
-    retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, idx)
-    if retval then return data:sub(0, data:len() - 1) else return nil end
+    retval, b, c, d, e, data = reaper.MIDI_GetTextSysexEvt(pattern.take, 0)
+    if retval then
+        return deserializePatternProperties(tostring(data))
+    end
+    return nil
 end
 
 function update()
@@ -912,14 +935,10 @@ function update()
 end
 
 
-function getPatternGridSizeFromTake(take)
-    -- todo read sysex
-    return nil
-end
 
 function importPatternDataFromUnknownMidiClip()
     dbg("TODO import unknown midi clip")
-    pattern.gridSize = 128      -- import at 1/128
+    pattern.gridSize = 128 -- import at 1/128
     itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
     retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
     pattern.init(beatsToPatternLines(fullbeatsOutOptional, 128))
@@ -930,6 +949,7 @@ end
 
 -- loads notes and cc from midi clip that was previously created by pattern editor
 function loadPatternData()
+    pattern.data = {}
     itemLengthSec = reaper.GetMediaItemInfo_Value(pattern.item, 'D_LENGTH')
     retval, measuresOutOptional, cmlOutOptional, fullbeatsOutOptional, cdenomOutOptional = reaper.TimeMap2_timeToBeats(0, itemLengthSec)
     if retval then
@@ -959,6 +979,9 @@ function loadPatternData()
                 end
             end
         end
+        reaper.MIDIEditor_LastFocused_OnCommand(40003, false) -- select all
+        reaper.MIDIEditor_LastFocused_OnCommand(40729, false) -- quantize to grid
+        reaper.MIDIEditor_LastFocused_OnCommand(40214, false) -- unselect all
     end
 end
 
@@ -980,7 +1003,8 @@ function takeChanged(editor, take)
         pattern.take = take
         pattern.item = reaper.GetMediaItemTake_Item(take)
         -- check if take was previously initialized by pattern editor (will have stored gridsize)
-        pattern.gridSize = getPatternGridSizeFromTake(take)
+        local v1, v2 = loadPatternSysexProperties()
+        pattern.gridSize = v1
         if pattern.gridSize == nil then
             importPatternDataFromUnknownMidiClip()
         else
@@ -1017,8 +1041,6 @@ end
 
 
 reaper.atexit(exit)
-
-
 
 --debugColumns()
 loop()
